@@ -15,12 +15,10 @@ class CustomAssertionError(AssertionError):
         super(CustomAssertionError, self).__init__(*args, **kwargs)
         CustomAssertionError.io_loop.stop()
 
-
 class TestIOLoop(IOLoop):
     def handle_callback_exception(self, callback):
         (type, value, traceback) = sys.exc_info()
         raise type, value, traceback
-
 
 class TornadoTestCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -28,7 +26,7 @@ class TornadoTestCase(unittest.TestCase):
         self.failureException = CustomAssertionError
 
     def setUp(self):
-        self.loop = TestIOLoop()
+        self.loop = IOLoop.instance()
         CustomAssertionError.io_loop = self.loop
         self.client = brukva.Client(io_loop=self.loop)
         self.client.connection.connect()
@@ -41,6 +39,8 @@ class TornadoTestCase(unittest.TestCase):
     def expect(self, expected):
         def callback(result):
             error, data = result
+            #print 'err ', error, '\n'
+            #print 'data', data, '\n'
             if error:
                 self.assertFalse(error, data)
             if callable(expected):
@@ -79,6 +79,7 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.client.setex('foo', 5, 'bar', self.expect(True))
         self.client.ttl('foo', [self.expect(5), self.finish])
         self.start()
+
 
     def test_setnx(self):
         self.client.setnx('a', 1, self.expect(True))
@@ -362,8 +363,16 @@ class ServerCommandsTestCase(TornadoTestCase):
                                                                                  ('a4', 19),
                                                                                  ('a1', 23),
                                                                                  ]),
-                                                                    self.finish(),
+                                                                    self.finish,
                                                                     ])
+        self.start()
+
+    def test_long_zset(self):
+        NUM = 1000
+        long_list = map(str, xrange(0, NUM))
+        for i in long_list:
+            self.client.zadd('foobar', i, i, self.expect(1))
+        self.client.zrange('foobar', 0, NUM, with_scores=False, callbacks=[self.expect(long_list),  self.finish])
         self.start()
 
     def test_sort(self):
