@@ -39,8 +39,6 @@ class TornadoTestCase(unittest.TestCase):
     def expect(self, expected):
         def callback(result):
             error, data = result
-            #print 'err ', error, '\n'
-            #print 'data', data, '\n'
             if error:
                 self.assertFalse(error, data)
             if callable(expected):
