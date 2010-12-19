@@ -196,7 +196,7 @@ class Client(object):
                                     reply_pubsub_message),
                 string_keys_to_dict('ZRANK ZREVRANK',
                                     reply_int),
-                string_keys_to_dict('ZSCORE ZINCRBY',
+                string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
                                     reply_int),
                 string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE',
                                     reply_zset),
@@ -600,6 +600,19 @@ class Client(object):
 
     def zrem(self, key, value, callbacks=None):
         self.execute_command('ZREM', callbacks, key, value)
+
+    def zcount(self, key, start, end, offset=None, limit=None, with_scores=None, callbacks=None):
+        tokens = [key, start, end]
+        if offset is not None:
+            tokens.append('LIMIT')
+            tokens.append(offset)
+            tokens.append(limit)
+        if with_scores:
+            tokens.append('WITHSCORES')
+        self.execute_command('ZCOUNT', callbacks, *tokens)
+
+    def zcard(self, key, callbacks=None):
+        self.execute_command('ZCARD', callbacks, key)
 
     def zscore(self, key, value, callbacks=None):
         self.execute_command('ZSCORE', callbacks, key, value)
