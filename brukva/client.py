@@ -79,9 +79,13 @@ class Connection(object):
         self._stream = None
 
     def write(self, data):
+        if not self._stream:
+            self.connect()
         self._stream.write(data)
 
     def consume(self, length):
+        if not self._stream:
+            self.connect()
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
