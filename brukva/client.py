@@ -79,8 +79,6 @@ class Connection(object):
         self._stream = None
 
     def write(self, data):
-        if not self._stream:
-            self.connect()
         self._stream.write(data)
 
     def consume(self, length):
@@ -107,6 +105,11 @@ class Connection(object):
     def read_done(self):
         self.in_progress = False
         self.try_to_perform_read()
+
+    def connected(self):
+        if self._stream:
+            return True
+        return False
 
 def reply_to_bool(r, *args, **kwargs):
     return bool(r)
@@ -167,13 +170,15 @@ def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
 
 class Client(object):
-    def __init__(self, host='localhost', port=6379, io_loop=None):
+    def __init__(self, host='localhost', port=6379, password=None, reconnect=False, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
 
         self.connection = Connection(host, port, io_loop=self._io_loop)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
+        self.password = password
+        self.reconnect = reconnect
         self.REPLY_MAP = dict_merge(
                 string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS EXPIRE HDEL HEXISTS '
                                     'HMSET MOVE MSET MSETNX SAVE SETNX',
@@ -216,6 +221,8 @@ class Client(object):
     #### connection
     def connect(self):
         self.connection.connect()
+        if self.password:
+            self.auth(self.password)
 
     def disconnect(self):
         self.connection.disconnect()
@@ -263,6 +270,8 @@ class Client(object):
         elif not hasattr(callbacks, '__iter__'):
             callbacks = [callbacks]
         try:
+            if self.reconnect and not self.connection.connected():
+                self.connect()
             self.connection.write(self.format(cmd, *args, **kwargs))
         except IOError:
             self._sudden_disconnect(callbacks)
@@ -765,6 +774,8 @@ class Pipeline(Client):
 
         request =  format_pipeline_request(command_stack)
         try:
+            if self.reconnect and not self.connection.connected():
+                self.connect()
             self.connection.write(request)
         except IOError:
             self.command_stack = []
