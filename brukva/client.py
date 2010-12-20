@@ -362,6 +362,9 @@ class Client(object):
             data = yield async(self.connection.readline)()
             if not data:
                 break
+            if isinstance(data, Exception):
+                errors[idx] = data
+                break
 
             error, token = yield self.process_data(data, cmd_line) #FIXME error
             tokens.append( token )
@@ -375,6 +378,8 @@ class Client(object):
     @process
     def consume_bulk(self, length, callback):
         data = yield async(self.connection.read)(length)
+        if isinstance(data, Exception):
+            callback((data, None))
         error = None
         if not data:
             error = ResponseError('EmptyResponse')
