@@ -322,6 +322,8 @@ class Client(object):
     @process
     def process_data(self, data, cmd_line, callback):
         error, response = None, None
+        if error:
+            callback((error, None))
 
         data = data[:-2] # strip \r\n
 
