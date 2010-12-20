@@ -179,7 +179,7 @@ class Client(object):
                                     make_reply_assert_msg('OK')),
                 string_keys_to_dict('SMEMBERS SINTER SUNION SDIFF',
                                     reply_set),
-                string_keys_to_dict('HGETALL',
+                string_keys_to_dict('HGETALL BRPOP BLPOP',
                                     reply_dict_from_pairs),
                 string_keys_to_dict('HGET',
                                     reply_str),
