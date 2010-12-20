@@ -93,6 +93,10 @@ class Connection(object):
 
     def read(self, length, callback):
         try:
+            if not self._stream:
+                self.client._sudden_disconnect([callback])
+                if self.client.reconnect:
+                    self.client.connect()
             self._stream.read_bytes(length, callback)
         except IOError:
             self.client._sudden_disconnect([callback])
@@ -102,6 +106,10 @@ class Connection(object):
 
     def readline(self, callback):
         try:
+            if not self._stream:
+                self.client._sudden_disconnect([callback])
+                if self.client.reconnect:
+                    self.client.connect()
             self._stream.read_until('\r\n', callback)
         except IOError:
             self.client._sudden_disconnect([callback])
