@@ -90,14 +90,14 @@ class Connection(object):
         try:
             self._stream.read_bytes(length, callback)
         except IOError:
-            print 'test_read'
+            callback(IOError('disconnected'))
 
 
     def readline(self, callback):
         try:
             self._stream.read_until('\r\n', callback)
         except IOError:
-            print 'test_readline'
+            callback(IOError('disconnected'))
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
@@ -342,6 +342,10 @@ class Client(object):
             data = yield async(self.connection.readline)()
             if not data:
                 break
+            
+            if type(data) is IOError:
+                if self.reconnect and not self.connection.connected():
+                    self.connect()
 
             error, token = yield self.process_data(data, cmd_line) #FIXME error
             tokens.append( token )
@@ -358,6 +362,9 @@ class Client(object):
         error = None
         if not data:
             error = ResponseError('EmptyResponse')
+        elif type(data) is IOError:
+            if self.reconnect and not self.connection.connected():
+                self.connect()
         else:
             data = data[:-2]
         callback( (error, data) )
