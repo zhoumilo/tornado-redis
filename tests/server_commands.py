@@ -232,9 +232,17 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.client.lpush('foo', 'ab', self.expect(True))
         self.client.lpush('bar', 'cd', self.expect(True))
         self.client.brpop(['foo', 'bar'], 1, self.expect({'foo':'ab'}))
-        self.client.llen('foo', [self.expect(0), self.finish])
-        self.client.llen('bar', [self.expect(1), self.finish])
-        self.client.brpop(['foo', 'bar'], 1, self.expect({'foo':'cd'}))
+        self.client.llen('foo', self.expect(0))
+        self.client.llen('bar', self.expect(1))
+        self.client.brpop(['foo', 'bar'], 1, [self.expect({'foo':'cd'}), self.finish])
+        self.start()
+
+    def test_brpoplpush(self):
+        self.client.lpush('foo', 'ab', self.expect(True))
+        self.client.lpush('bar', 'cd', self.expect(True))
+        self.client.brpoplpush('foo', 'bar', self.expect('ab'))
+        self.client.llen('foo', self.expect(0))
+        self.client.lrange('bar', 0, -1, [self.expect(['ab', 'cd']), self.finish])
         self.start()
 
     def test_sets(self):

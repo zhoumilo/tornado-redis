@@ -493,6 +493,10 @@ class Client(object):
         tokens.append(timeout)
         self.execute_command('BRPOP', callbacks, *tokens)
 
+    def brpoplpush(self, src, dst, timeout=1, callbacks=None):
+        tokens = [src, dst, timeout]
+        self.execute_command('BRPOPLPUSH', callbacks, *tokens)
+
     def lindex(self, key, index, callbacks=None):
         self.execute_command('LINDEX', callbacks, key, index)
 
