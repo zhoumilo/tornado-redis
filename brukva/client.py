@@ -51,7 +51,8 @@ def format_pipeline_request(command_stack):
     return ''.join(format(c.cmd, *c.args, **c.kwargs) for c in command_stack)
 
 class Connection(object):
-    def __init__(self, host, port, timeout=None, io_loop=None):
+    def __init__(self, client, host, port, timeout=None, io_loop=None):
+        self.client = client
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -79,25 +80,33 @@ class Connection(object):
         self._stream = None
 
     def write(self, data):
+        if not self._stream:
+            if self.client.reconnect:
+                self.client.connect()
         self._stream.write(data)
 
     def consume(self, length):
         if not self._stream:
-            self.connect()
+            if self.client.reconnect:
+                self.client.connect()
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
         try:
             self._stream.read_bytes(length, callback)
         except IOError:
-            callback(IOError('disconnected'))
+            self.client._sudden_disconnect([callback])
+            if self.client.reconnect:
+                self.client.connect()
 
 
     def readline(self, callback):
         try:
             self._stream.read_until('\r\n', callback)
         except IOError:
-            callback(IOError('disconnected'))
+            self.client._sudden_disconnect([callback])
+            if self.client.reconnect:
+                self.client.connect()
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
@@ -180,7 +189,7 @@ class Client(object):
     def __init__(self, host='localhost', port=6379, password=None, reconnect=False, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
 
-        self.connection = Connection(host, port, io_loop=self._io_loop)
+        self.connection = Connection(self, host, port, io_loop=self._io_loop)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
@@ -342,10 +351,6 @@ class Client(object):
             data = yield async(self.connection.readline)()
             if not data:
                 break
-            
-            if type(data) is IOError:
-                if self.reconnect and not self.connection.connected():
-                    self.connect()
 
             error, token = yield self.process_data(data, cmd_line) #FIXME error
             tokens.append( token )
@@ -362,9 +367,6 @@ class Client(object):
         error = None
         if not data:
             error = ResponseError('EmptyResponse')
-        elif type(data) is IOError:
-            if self.reconnect and not self.connection.connected():
-                self.connect()
         else:
             data = data[:-2]
         callback( (error, data) )
