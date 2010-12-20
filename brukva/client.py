@@ -87,10 +87,17 @@ class Connection(object):
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
-        self._stream.read_bytes(length, callback)
+        try:
+            self._stream.read_bytes(length, callback)
+        except IOError:
+            print 'test_read'
+
 
     def readline(self, callback):
-        self._stream.read_until('\r\n', callback)
+        try:
+            self._stream.read_until('\r\n', callback)
+        except IOError:
+            print 'test_readline'
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
