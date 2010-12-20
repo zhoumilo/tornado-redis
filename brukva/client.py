@@ -324,6 +324,7 @@ class Client(object):
         error, response = None, None
         if error:
             callback((error, None))
+        print error, response
 
         data = data[:-2] # strip \r\n
 
