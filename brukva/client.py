@@ -332,7 +332,10 @@ class Client(object):
         elif data == '*0' or data == '*-1':
             response = []
         else:
-            print data
+            if len(data) == 0:
+                if self.reconnect:
+                    self.connect()
+                callback((IOError('Disconnected'),None))
             head, tail = data[0], data[1:]
 
             if head == '*':
