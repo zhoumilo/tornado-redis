@@ -204,7 +204,8 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.client.hincrby('foo', 'b', 3, self.expect(5))
         self.client.hkeys('foo', self.expect(['b']))
         self.client.hvals('foo', self.expect(['5']))
-        self.client.hmget('foo', 'b', self.expect(['5']))
+        self.client.hset('foo', 'a', 1, self.expect(True))
+        self.client.hmget('foo', ['a', 'b'], self.expect({'a': '1', 'b': '5'}))
         self.client.hexists('foo', 'b', [self.expect(True), self.finish])
         self.start()
 

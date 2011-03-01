@@ -138,6 +138,9 @@ def reply_zset(r, *args, **kwargs):
         return r
     return zip(r[::2], map(float, r[1::2]))
 
+def reply_hmget(r, key, *fields, **kwargs):
+    return dict(zip(fields, r))
+
 def reply_info(response):
     info = {}
     def get_value(value):
@@ -191,6 +194,7 @@ class Client(object):
                                     reply_int),
                 string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE',
                                     reply_zset),
+                {'HMGET': reply_hmget},
                 {'PING': make_reply_assert_msg('PONG')},
                 {'LASTSAVE': reply_datetime },
                 {'TTL': reply_ttl } ,
