@@ -1,9 +1,12 @@
-import brukva
-from brukva.exceptions import ResponseError
 import unittest
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
+import traceback as tb
+
 from tornado.ioloop import IOLoop
+
+import brukva
+from brukva.exceptions import ResponseError
 
 def callable(obj):
     return hasattr(obj, '__call__')
@@ -34,32 +37,35 @@ class TornadoTestCase(unittest.TestCase):
         self.client.flushdb()
 
     def tearDown(self):
-        self.finish()
+        pass
 
     def expect(self, expected):
+        source_line = '\n' + tb.format_stack()[-2]
         def callback(result):
             error, data = result
             if error:
-                self.assertFalse(error, data)
+                self.assertFalse(error, data, msg=source_line)
             if callable(expected):
-                self.assertTrue(expected(data))
+                self.assertTrue(expected(data), msg=source_line)
             else:
-                self.assertEqual(expected, data)
+                self.assertEqual(expected, data, msg=source_line)
+        callback.__name__ = "expect_%s" % repr(expected)
         return callback
 
     def pexpect(self, expected_list, list_without_errors=True):
         if list_without_errors:
             expected_list = [(None, el) for el in expected_list]
+
+        source_line = '\n' + tb.format_stack()[-2]
         def callback(result):
             self.assertEqual(len(result), len(expected_list) )
             for (e, d), (exp_e, exp_d)  in zip(result, expected_list):
                 if exp_e:
-                    self.assertTrue( isinstance(e, exp_e) )
-
+                    self.assertTrue( isinstance(e, exp_e), msg=source_line)
                 if callable(exp_d):
-                    self.assertTrue(exp_d(d))
+                    self.assertTrue(exp_d(d), msg=source_line)
                 else:
-                    self.assertEqual(d, exp_d)
+                    self.assertEqual(d, exp_d, msg=source_line)
         return callback
 
     def finish(self, *args):
@@ -77,7 +83,6 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.client.setex('foo', 5, 'bar', self.expect(True))
         self.client.ttl('foo', [self.expect(5), self.finish])
         self.start()
-
 
     def test_setnx(self):
         self.client.setnx('a', 1, self.expect(True))
