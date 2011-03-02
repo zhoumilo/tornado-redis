@@ -51,10 +51,10 @@ def format_pipeline_request(command_stack):
     return ''.join(format(c.cmd, *c.args, **c.kwargs) for c in command_stack)
 
 class Connection(object):
-    def __init__(self, client, host, port, timeout=None, io_loop=None):
-        self.client = client
+    def __init__(self, host, port, on_reconnect, timeout=None, io_loop=None):
         self.host = host
         self.port = port
+        self.on_reconnect = on_reconnect
         self.timeout = timeout
         self._stream = None
         self._io_loop = io_loop
@@ -81,40 +81,33 @@ class Connection(object):
 
     def write(self, data):
         if not self._stream:
-            if self.client.reconnect:
-                self.client.connect()
+            self.on_reconnect()
         self._stream.write(data)
 
     def consume(self, length):
         if not self._stream:
-            if self.client.reconnect:
-                self.client.connect()
+            self.on_reconnect()
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
         try:
             if not self._stream:
                 self.client._sudden_disconnect([callback])
-                if self.client.reconnect:
-                    self.client.connect()
+                self.on_reconnect()
             self._stream.read_bytes(length, callback)
         except IOError:
             self.client._sudden_disconnect([callback])
-            if self.client.reconnect:
-                self.client.connect()
-
+            self.on_reconnect()
 
     def readline(self, callback):
         try:
             if not self._stream:
                 self.client._sudden_disconnect([callback])
-                if self.client.reconnect:
-                    self.client.connect()
+                self.on_reconnect()
             self._stream.read_until('\r\n', callback)
         except IOError:
             self.client._sudden_disconnect([callback])
-            if self.client.reconnect:
-                self.client.connect()
+            self.on_reconnect()
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
@@ -200,7 +193,7 @@ class Client(object):
     def __init__(self, host='localhost', port=6379, password=None, reconnect=False, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
 
-        self.connection = Connection(self, host, port, io_loop=self._io_loop)
+        self.connection = Connection(host, port, self.on_reconnect, io_loop=self._io_loop)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
@@ -254,6 +247,10 @@ class Client(object):
 
     def disconnect(self):
         self.connection.disconnect()
+
+    def on_reconnect(self):
+        if self.reconnect:
+            self.connect()
     ####
 
     #### formatting
@@ -337,8 +334,7 @@ class Client(object):
             response = []
         else:
             if len(data) == 0:
-                if self.reconnect:
-                    self.connect()
+                self.on_reconnect()
                 callback((IOError('Disconnected'),None))
             head, tail = data[0], data[1:]
 
