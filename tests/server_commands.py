@@ -44,11 +44,14 @@ class TornadoTestCase(unittest.TestCase):
         def callback(result):
             error, data = result
             if error:
-                self.assertFalse(error, data, msg=source_line)
+                self.assertFalse(error, data,
+                    msg=source_line+'  Error:'+repr(error))
             if callable(expected):
-                self.assertTrue(expected(data), msg=source_line)
+                self.assertTrue(expected(data),
+                    msg=source_line+'  Got:'+repr(data))
             else:
-                self.assertEqual(expected, data, msg=source_line)
+                self.assertEqual(expected, data,
+                    msg=source_line+'  Got:'+repr(data))
         callback.__name__ = "expect_%s" % repr(expected)
         return callback
 
@@ -61,11 +64,14 @@ class TornadoTestCase(unittest.TestCase):
             self.assertEqual(len(result), len(expected_list) )
             for (e, d), (exp_e, exp_d)  in zip(result, expected_list):
                 if exp_e:
-                    self.assertTrue( isinstance(e, exp_e), msg=source_line)
+                    self.assertTrue( isinstance(e, exp_e),
+                        msg=source_line+'  Error:'+repr(e))
                 if callable(exp_d):
-                    self.assertTrue(exp_d(d), msg=source_line)
+                    self.assertTrue(exp_d(d),
+                        msg=source_line+'  Got:'+repr(d))
                 else:
-                    self.assertEqual(d, exp_d, msg=source_line)
+                    self.assertEqual(d, exp_d,
+                        msg=source_line+'  Got:'+repr(d))
         return callback
 
     def finish(self, *args):
