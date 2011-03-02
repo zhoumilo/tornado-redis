@@ -246,7 +246,7 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.client.brpop(['foo', 'bar'], 1, self.expect({'foo':'ab'}))
         self.client.llen('foo', self.expect(0))
         self.client.llen('bar', self.expect(1))
-        self.client.brpop(['foo', 'bar'], 1, [self.expect({'foo':'cd'}), self.finish])
+        self.client.brpop(['foo', 'bar'], 1, [self.expect({'bar':'cd'}), self.finish])
         self.start()
 
     def test_brpoplpush(self):
