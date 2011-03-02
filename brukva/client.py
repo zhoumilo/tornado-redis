@@ -51,7 +51,8 @@ def format_pipeline_request(command_stack):
     return ''.join(format(c.cmd, *c.args, **c.kwargs) for c in command_stack)
 
 class Connection(object):
-    def __init__(self, host, port, timeout=None, io_loop=None):
+    def __init__(self, client, host, port, timeout=None, io_loop=None):
+        self.client = client
         self.host = host
         self.port = port
         self.timeout = timeout
@@ -79,16 +80,41 @@ class Connection(object):
         self._stream = None
 
     def write(self, data):
+        if not self._stream:
+            if self.client.reconnect:
+                self.client.connect()
         self._stream.write(data)
 
     def consume(self, length):
+        if not self._stream:
+            if self.client.reconnect:
+                self.client.connect()
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
-        self._stream.read_bytes(length, callback)
+        try:
+            if not self._stream:
+                self.client._sudden_disconnect([callback])
+                if self.client.reconnect:
+                    self.client.connect()
+            self._stream.read_bytes(length, callback)
+        except IOError:
+            self.client._sudden_disconnect([callback])
+            if self.client.reconnect:
+                self.client.connect()
+
 
     def readline(self, callback):
-        self._stream.read_until('\r\n', callback)
+        try:
+            if not self._stream:
+                self.client._sudden_disconnect([callback])
+                if self.client.reconnect:
+                    self.client.connect()
+            self._stream.read_until('\r\n', callback)
+        except IOError:
+            self.client._sudden_disconnect([callback])
+            if self.client.reconnect:
+                self.client.connect()
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
@@ -103,6 +129,11 @@ class Connection(object):
     def read_done(self):
         self.in_progress = False
         self.try_to_perform_read()
+
+    def connected(self):
+        if self._stream:
+            return True
+        return False
 
 def reply_to_bool(r, *args, **kwargs):
     return bool(r)
@@ -166,13 +197,15 @@ def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
 
 class Client(object):
-    def __init__(self, host='localhost', port=6379, io_loop=None):
+    def __init__(self, host='localhost', port=6379, password=None, reconnect=False, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
 
-        self.connection = Connection(host, port, io_loop=self._io_loop)
+        self.connection = Connection(self, host, port, io_loop=self._io_loop)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
+        self.password = password
+        self.reconnect = reconnect
         self.REPLY_MAP = dict_merge(
                 string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS EXPIRE HDEL HEXISTS '
                                     'HMSET MOVE MSET MSETNX SAVE SETNX',
@@ -190,7 +223,7 @@ class Client(object):
                                     reply_pubsub_message),
                 string_keys_to_dict('ZRANK ZREVRANK',
                                     reply_int),
-                string_keys_to_dict('ZSCORE ZINCRBY',
+                string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
                                     reply_int),
                 string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE',
                                     reply_zset),
@@ -216,6 +249,8 @@ class Client(object):
     #### connection
     def connect(self):
         self.connection.connect()
+        if self.password:
+            self.auth(self.password)
 
     def disconnect(self):
         self.connection.disconnect()
@@ -263,6 +298,8 @@ class Client(object):
         elif not hasattr(callbacks, '__iter__'):
             callbacks = [callbacks]
         try:
+            if self.reconnect and not self.connection.connected():
+                self.connect()
             self.connection.write(self.format(cmd, *args, **kwargs))
         except IOError:
             self._sudden_disconnect(callbacks)
@@ -289,6 +326,8 @@ class Client(object):
     @process
     def process_data(self, data, cmd_line, callback):
         error, response = None, None
+        if error:
+            callback((error, None))
 
         data = data[:-2] # strip \r\n
 
@@ -297,6 +336,10 @@ class Client(object):
         elif data == '*0' or data == '*-1':
             response = []
         else:
+            if len(data) == 0:
+                if self.reconnect:
+                    self.connect()
+                callback((IOError('Disconnected'),None))
             head, tail = data[0], data[1:]
 
             if head == '*':
@@ -326,6 +369,9 @@ class Client(object):
             data = yield async(self.connection.readline)()
             if not data:
                 break
+            if isinstance(data, Exception):
+                errors[idx] = data
+                break
 
             error, token = yield self.process_data(data, cmd_line) #FIXME error
             tokens.append( token )
@@ -339,6 +385,8 @@ class Client(object):
     @process
     def consume_bulk(self, length, callback):
         data = yield async(self.connection.read)(length)
+        if isinstance(data, Exception):
+            callback((data, None))
         error = None
         if not data:
             error = ResponseError('EmptyResponse')
@@ -596,6 +644,19 @@ class Client(object):
     def zrem(self, key, value, callbacks=None):
         self.execute_command('ZREM', callbacks, key, value)
 
+    def zcount(self, key, start, end, offset=None, limit=None, with_scores=None, callbacks=None):
+        tokens = [key, start, end]
+        if offset is not None:
+            tokens.append('LIMIT')
+            tokens.append(offset)
+            tokens.append(limit)
+        if with_scores:
+            tokens.append('WITHSCORES')
+        self.execute_command('ZCOUNT', callbacks, *tokens)
+
+    def zcard(self, key, callbacks=None):
+        self.execute_command('ZCARD', callbacks, key)
+
     def zscore(self, key, value, callbacks=None):
         self.execute_command('ZSCORE', callbacks, key, value)
 
@@ -769,6 +830,8 @@ class Pipeline(Client):
 
         request =  format_pipeline_request(command_stack)
         try:
+            if self.reconnect and not self.connection.connected():
+                self.connect()
             self.connection.write(request)
         except IOError:
             self.command_stack = []
