@@ -252,7 +252,9 @@ class ServerCommandsTestCase(TornadoTestCase):
     def test_brpoplpush(self):
         self.client.lpush('foo', 'ab', self.expect(True))
         self.client.lpush('bar', 'cd', self.expect(True))
-        self.client.brpoplpush('foo', 'bar', self.expect('ab'))
+        self.client.lrange('foo', 0, -1, self.expect(['ab']))
+        self.client.lrange('bar', 0, -1, self.expect(['cd']))
+        self.client.brpoplpush('foo', 'bar', callbacks=[self.expect('ab'), self.finish])
         self.client.llen('foo', self.expect(0))
         self.client.lrange('bar', 0, -1, [self.expect(['ab', 'cd']), self.finish])
         self.start()
