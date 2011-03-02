@@ -403,12 +403,12 @@ class ServerCommandsTestCase(TornadoTestCase):
         self.start()
 
     def test_sort(self):
-        def make_list(key, items):
-            self.client.delete(key, callbacks=self.expect(True))
+        def make_list(key, items, expect_value=True):
+            self.client.delete(key, callbacks=self.expect(expect_value))
             for i in items:
                 self.client.rpush(key, i)
         self.client.sort('a', callbacks=self.expect([]))
-        make_list('a', '3214')
+        make_list('a', '3214', False)
         self.client.sort('a', callbacks=self.expect(['1', '2', '3', '4']))
         self.client.sort('a', start=1, num=2, callbacks=self.expect(['2', '3']))
 
