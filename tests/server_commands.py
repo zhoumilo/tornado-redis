@@ -18,10 +18,9 @@ class CustomAssertionError(AssertionError):
         super(CustomAssertionError, self).__init__(*args, **kwargs)
         CustomAssertionError.io_loop.stop()
 
-class TestIOLoop(IOLoop):
-    def handle_callback_exception(self, callback):
-        (type, value, traceback) = sys.exc_info()
-        raise type, value, traceback
+def handle_callback_exception(callback):
+    (type, value, traceback) = sys.exc_info()
+    raise type, value, None
 
 class TornadoTestCase(unittest.TestCase):
     def __init__(self, *args, **kwargs):
@@ -30,6 +29,7 @@ class TornadoTestCase(unittest.TestCase):
 
     def setUp(self):
         self.loop = IOLoop.instance()
+        setattr(self.loop, 'handle_callback_exception', handle_callback_exception)
         CustomAssertionError.io_loop = self.loop
         self.client = brukva.Client(io_loop=self.loop)
         self.client.connection.connect()
