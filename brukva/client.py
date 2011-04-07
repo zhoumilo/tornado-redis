@@ -73,20 +73,26 @@ class Connection(object):
             raise ConnectionError(str(e))
 
     def disconnect(self):
-        try:
-            self._stream.close()
-        except socket.error, e:
-            pass
-        self._stream = None
+        if self._stream:
+            try:
+                self._stream.close()
+            except socket.error, e:
+                pass
+            self._stream = None
 
     def write(self, data):
         if not self._stream:
             self.on_reconnect()
-        self._stream.write(data)
+        if not self._stream:
+            raise ConnectionError('Tried to write to non-existent connection')
+        else:
+            self._stream.write(data)
 
     def consume(self, length):
         if not self._stream:
             self.on_reconnect()
+        if not self._stream:
+            raise ConnectionError('Tried to consume from non-existent connection')
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
@@ -94,6 +100,8 @@ class Connection(object):
             if not self._stream:
                 self.client._sudden_disconnect([callback])
                 self.on_reconnect()
+            if not self._stream:
+                raise ConnectionError('Tried to read from non-existent connection')
             self._stream.read_bytes(length, callback)
         except IOError:
             self.client._sudden_disconnect([callback])
@@ -300,6 +308,10 @@ class Client(object):
             self.connection.write(self.format(cmd, *args, **kwargs))
         except IOError:
             self._sudden_disconnect(callbacks)
+            return
+        except Exception, e:
+            self.connection.disconnect()
+            self.call_callbacks(callbacks, (e, None) )
             return
 
         cmd_line = CmdLine(cmd, *args, **kwargs)
@@ -811,6 +823,12 @@ class Pipeline(Client):
     def discard(self): # actually do nothing with redis-server, just flush command_stack
         self.command_stack = []
 
+    def _sudden_disconnect(self, callbacks, error=None):
+        self.connection.disconnect()
+        self.call_callbacks(callbacks,
+            (error or ConnectionError("Socket closed on remote end"), [])
+        )
+
     @process
     def execute(self, callbacks):
         command_stack = self.command_stack
@@ -832,6 +850,10 @@ class Pipeline(Client):
         except IOError:
             self.command_stack = []
             self._sudden_disconnect(callbacks)
+            return
+        except Exception, e:
+            self.command_stack = []
+            self._sudden_disconnect(callbacks, e)
             return
 
         yield self.connection.queue_wait()
@@ -855,14 +877,14 @@ class Pipeline(Client):
         self.connection.read_done()
 
         def format_replies(cmd_lines, responses):
-            result = []
+            results = []
 
             for cmd_line, (error, response) in zip(cmd_lines, responses):
                 if not error:
-                    result.append((None,  self.format_reply(cmd_line, response)))
+                    results.append((None,  self.format_reply(cmd_line, response)))
                 else:
-                    result.append((error, response))
-            return result
+                    results.append((error, response))
+            return results
 
         if self.transactional:
             command_stack = command_stack[:-1]
@@ -872,11 +894,11 @@ class Pipeline(Client):
                 for idx in xrange(len(tr_responses))
             ]
 
-            result = format_replies(command_stack[1:], responses)
+            results = format_replies(command_stack[1:], responses)
 
         else:
-            result = format_replies(command_stack, responses)
+            results = format_replies(command_stack, responses)
 
-        self.call_callbacks(callbacks, result)
+        self.call_callbacks(callbacks, (None, results))
 
 
