@@ -1,13 +1,34 @@
 # -*- coding: utf-8 -*-
 import socket
+from functools import partial
+from itertools import izip
+import contextlib
+import logging
+from collections import Iterable
+
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
 from adisp import async, process
 
-from functools import partial
-from itertools import izip
 from datetime import datetime
 from brukva.exceptions import RedisError, ConnectionError, ResponseError, InvalidResponse
+
+log = logging.getLogger('brukva.client')
+
+@contextlib.contextmanager
+def forward_error(callbacks, cleanup=None):
+    try:
+        yield callbacks
+    except Exception, e:
+        log.error(e)
+        if isinstance(callbacks, Iterable):
+            for cb in callbacks:
+                callbacks(e)
+        else:
+            callbacks(e)
+    finally:
+        if cleanup:
+            cleanup()
 
 class Message(object):
     def __init__(self, kind, channel, body):
@@ -83,16 +104,16 @@ class Connection(object):
     def write(self, data):
         if not self._stream:
             self.on_reconnect()
-        if not self._stream:
-            raise ConnectionError('Tried to write to non-existent connection')
+            if not self._stream:
+                raise ConnectionError('Tried to write to non-existent connection')
         else:
             self._stream.write(data)
 
     def consume(self, length):
         if not self._stream:
             self.on_reconnect()
-        if not self._stream:
-            raise ConnectionError('Tried to consume from non-existent connection')
+            if not self._stream:
+                raise ConnectionError('Tried to consume from non-existent connection')
         self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
@@ -100,8 +121,8 @@ class Connection(object):
             if not self._stream:
                 self.client._sudden_disconnect([callback])
                 self.on_reconnect()
-            if not self._stream:
-                raise ConnectionError('Tried to read from non-existent connection')
+                if not self._stream:
+                    raise ConnectionError('Tried to read from non-existent connection')
             self._stream.read_bytes(length, callback)
         except IOError:
             self.client._sudden_disconnect([callback])
@@ -112,6 +133,8 @@ class Connection(object):
             if not self._stream:
                 self.client._sudden_disconnect([callback])
                 self.on_reconnect()
+                if not self._stream:
+                    raise ConnectionError('Tried to read from non-existent connection')
             self._stream.read_until('\r\n', callback)
         except IOError:
             self.client._sudden_disconnect([callback])
@@ -283,7 +306,10 @@ class Client(object):
         try:
             res =  self.REPLY_MAP[cmd_line.cmd](data, *cmd_line.args, **cmd_line.kwargs)
         except Exception, e:
-            res = ResponseError('failed to format reply, raw data: %s' % data, cmd_line)
+            raise ResponseError(
+                'failed to format reply to %s, raw data: %s; err message: %s' %
+                cmd_line, data, e
+            )
         return res
     ####
 
@@ -294,114 +320,103 @@ class Client(object):
 
     def _sudden_disconnect(self, callbacks):
         self.connection.disconnect()
-        self.call_callbacks(callbacks, (ConnectionError("Socket closed on remote end"), None))
+        raise ConnectionError("Socket closed on remote end")
 
     @process
     def execute_command(self, cmd, callbacks, *args, **kwargs):
-        if callbacks is None:
-            callbacks = []
-        elif not hasattr(callbacks, '__iter__'):
-            callbacks = [callbacks]
-        try:
-            if self.reconnect and not self.connection.connected():
-                self.connect()
-            self.connection.write(self.format(cmd, *args, **kwargs))
-        except IOError:
-            self._sudden_disconnect(callbacks)
-            return
-        except Exception, e:
-            self.connection.disconnect()
-            self.call_callbacks(callbacks, (e, None) )
-            return
-
-        cmd_line = CmdLine(cmd, *args, **kwargs)
-        yield self.connection.queue_wait()
-
-        data = yield async(self.connection.readline)()
-        if not data:
-            result = None
-            error = Exception('todo')
-        else:
+        with forward_error(callbacks):
+            if callbacks is None:
+                callbacks = []
+            elif not hasattr(callbacks, '__iter__'):
+                callbacks = [callbacks]
             try:
-                error, response = yield self.process_data(data, cmd_line)
-                result = self.format_reply(cmd_line, response)
+                if self.reconnect and not self.connection.connected():
+                    self.connect()
+                self.connection.write(self.format(cmd, *args, **kwargs))
+            except IOError:
+                self._sudden_disconnect(callbacks)
             except Exception, e:
-                error, result = e, None
+                self.connection.disconnect()
+                raise e
 
-        self.connection.read_done()
-        self.call_callbacks(callbacks, (error, result))
+            cmd_line = CmdLine(cmd, *args, **kwargs)
+            yield self.connection.queue_wait()
+
+            data = yield async(self.connection.readline)()
+            if not data:
+                result = None
+                raise Exception('TODO: [no data from connection->readline')
+            else:
+                response = yield self.process_data(data, cmd_line)
+                result = self.format_reply(cmd_line, response)
+
+            self.connection.read_done()
+            self.call_callbacks(callbacks, result)
 
     @async
     @process
     def process_data(self, data, cmd_line, callback):
-        error, response = None, None
-        if error:
-            callback((error, None))
+        with forward_error(callback):
+            data = data[:-2] # strip \r\n
 
-        data = data[:-2] # strip \r\n
-
-        if data == '$-1':
-            response =  None
-        elif data == '*0' or data == '*-1':
-            response = []
-        else:
-            if len(data) == 0:
-                self.on_reconnect()
-                callback((IOError('Disconnected'),None))
-            head, tail = data[0], data[1:]
-
-            if head == '*':
-                error, response = yield self.consume_multibulk(int(tail), cmd_line)
-            elif head == '$':
-                error, response = yield self.consume_bulk(int(tail)+2)
-            elif head == '+':
-                response = tail
-            elif head == ':':
-                response = int(tail)
-            elif head == '-':
-                if tail.startswith('ERR'):
-                    tail = tail[4:]
-                error = ResponseError(tail, cmd_line)
+            if data == '$-1':
+                response =  None
+            elif data == '*0' or data == '*-1':
+                response = []
             else:
-                error = ResponseError('Unknown response type %s' % head, cmd_line)
+                if len(data) == 0:
+                    self.on_reconnect()
+                    raise IOError('Disconnected')
+                head, tail = data[0], data[1:]
 
-        callback( (error, response) )
+                if head == '*':
+                    response = yield self.consume_multibulk(int(tail), cmd_line)
+                elif head == '$':
+                    response = yield self.consume_bulk(int(tail)+2)
+                elif head == '+':
+                    response = tail
+                elif head == ':':
+                    response = int(tail)
+                elif head == '-':
+                    if tail.startswith('ERR'):
+                        tail = tail[4:]
+                    response = ResponseError(tail, cmd_line)
+                else:
+                    raise ResponseError('Unknown response type %s' %
+                        (head, cmd_line)
+                    )
+
+            callback(response)
 
     @async
     @process
     def consume_multibulk(self, length, cmd_line, callback):
-        tokens = []
-        errors = {}
-        idx = 0
-        while len(tokens) < length:
-            data = yield async(self.connection.readline)()
-            if not data:
-                break
-            if isinstance(data, Exception):
-                errors[idx] = data
-                break
-
-            error, token = yield self.process_data(data, cmd_line) #FIXME error
-            tokens.append( token )
-            if error:
-                errors[idx] = error
-
-            idx += 1
-        callback( (errors, tokens) )
+        with forward_error(callback):
+            tokens = []
+            while len(tokens) < length:
+                data = yield async(self.connection.readline)()
+                if not data:
+                    raise ResponseError(
+                        'Not enough data in response to %s, accumulated tokens: %s'%
+                        (cmd_line, tokens)
+                    )
+                token = yield self.process_data(data, cmd_line) #FIXME error
+                tokens.append( token )
+            callback(tokens)
 
     @async
     @process
     def consume_bulk(self, length, callback):
-        data = yield async(self.connection.read)(length)
-        if isinstance(data, Exception):
-            callback((data, None))
-        error = None
-        if not data:
-            error = ResponseError('EmptyResponse')
-        else:
-            data = data[:-2]
-        callback( (error, data) )
-    ####
+        with  forward_error(callback):
+            data = yield async(self.connection.read)(length)
+            if isinstance(data, Exception):
+                raise data
+            if not data:
+                raise ResponseError('EmptyResponse')
+            else:
+                data = data[:-2]
+            callback(data)
+        ####
 
     ### MAINTENANCE
     def bgrewriteaof(self, callbacks=None):
@@ -825,80 +840,74 @@ class Pipeline(Client):
 
     def _sudden_disconnect(self, callbacks, error=None):
         self.connection.disconnect()
-        self.call_callbacks(callbacks,
-            (error or ConnectionError("Socket closed on remote end"), [])
-        )
+        raise error or ConnectionError("Socket closed on remote end")
 
     @process
     def execute(self, callbacks):
-        command_stack = self.command_stack
-        self.command_stack = []
-
-        if callbacks is None:
-            callbacks = []
-        elif not hasattr(callbacks, '__iter__'):
-            callbacks = [callbacks]
-
-        if self.transactional:
-            command_stack = [CmdLine('MULTI')] + command_stack + [CmdLine('EXEC')]
-
-        request =  format_pipeline_request(command_stack)
-        try:
-            if self.reconnect and not self.connection.connected():
-                self.connect()
-            self.connection.write(request)
-        except IOError:
+        with forward_error(callbacks):
+            command_stack = self.command_stack
             self.command_stack = []
-            self._sudden_disconnect(callbacks)
-            return
-        except Exception, e:
-            self.command_stack = []
-            self._sudden_disconnect(callbacks, e)
-            return
 
-        yield self.connection.queue_wait()
-        responses = []
-        total = len(command_stack)
-        cmds = iter(command_stack)
-        while len(responses) < total:
-            data = yield async(self.connection.readline)()
-            if not data:
-                break
+            if callbacks is None:
+                callbacks = []
+            elif not hasattr(callbacks, '__iter__'):
+                callbacks = [callbacks]
+
+            if self.transactional:
+                command_stack = [CmdLine('MULTI')] + command_stack + [CmdLine('EXEC')]
+
+            request =  format_pipeline_request(command_stack)
             try:
-                cmd_line = cmds.next()
-                if self.transactional and cmd_line.cmd != 'EXEC':
-                    error, response = yield self.process_data(data, CmdLine('MULTI_PART'))
-                else:
-                    error, response = yield self.process_data(data, cmd_line)
+                if self.reconnect and not self.connection.connected():
+                    self.connect()
+                self.connection.write(request)
+            except IOError:
+                self.command_stack = []
+                self._sudden_disconnect(callbacks)
             except Exception, e:
-                error, response  = e, None
+                self.command_stack = []
+                self._sudden_disconnect(callbacks, e)
 
-            responses.append((error, response ) )
-        self.connection.read_done()
+            yield self.connection.queue_wait()
+            responses = []
+            total = len(command_stack)
+            cmds = iter(command_stack)
 
-        def format_replies(cmd_lines, responses):
-            results = []
+            while len(responses) < total:
+                data = yield async(self.connection.readline)()
+                if not data:
+                    raise ResponseError('Not enough data after EXEC')
 
-            for cmd_line, (error, response) in zip(cmd_lines, responses):
-                if not error:
-                    results.append((None,  self.format_reply(cmd_line, response)))
-                else:
-                    results.append((error, response))
-            return results
+                try:
+                    cmd_line = cmds.next()
+                    if self.transactional and cmd_line.cmd != 'EXEC':
+                        response = yield self.process_data(data, CmdLine('MULTI_PART'))
+                    else:
+                        response = yield self.process_data(data, cmd_line)
+                    responses.append(response)
+                except Exception,e :
+                    responses.append(e)
+            self.connection.read_done()
 
-        if self.transactional:
-            command_stack = command_stack[:-1]
-            errors, tr_responses = responses[-1] # actual data only from EXEC command
-            responses = [
-                (errors.get(idx, None), tr_responses[idx])
-                for idx in xrange(len(tr_responses))
-            ]
+            def format_replies(cmd_lines, responses):
+                results = []
+                for cmd_line, response in zip(cmd_lines, responses):
+                    try:
+                        results.append(self.format_reply(cmd_line, response))
+                    except Exception, e:
+                        results.append(e)
+                return results
 
-            results = format_replies(command_stack[1:], responses)
+            if self.transactional:
+                command_stack = command_stack[:-1]
+                responses = responses[-1] # actual data only from EXEC command
+                            #FIXME:  assert all other responses to be 'QUEUED'
+                log.info('responses %s', responses)
+                results = format_replies(command_stack[1:], responses)
+                log.info('results %s', results)
+            else:
+                results = format_replies(command_stack, responses)
 
-        else:
-            results = format_replies(command_stack, responses)
-
-        self.call_callbacks(callbacks, (None, results))
+            self.call_callbacks(callbacks, results)
 
 

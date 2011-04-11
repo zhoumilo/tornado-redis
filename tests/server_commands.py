@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import unittest
 import sys
 from datetime import datetime
@@ -42,16 +45,15 @@ class TornadoTestCase(unittest.TestCase):
     def expect(self, expected):
         source_line = '\n' + tb.format_stack()[-2]
         def callback(result):
-            error, data = result
-            if error:
-                self.assertFalse(error, data,
-                    msg=source_line+'  Error:'+repr(error))
+            if isinstance(expected, Exception):
+                self.assertTrue(isinstance(result, expected),
+                    msg=source_line+'  Got:'+repr(result))
             if callable(expected):
-                self.assertTrue(expected(data),
-                    msg=source_line+'  Got:'+repr(data))
+                self.assertTrue(expected(result),
+                    msg=source_line+'  Got:'+repr(result))
             else:
-                self.assertEqual(expected, data,
-                    msg=source_line+'  Got:'+repr(data))
+                self.assertEqual(expected, result,
+                    msg=source_line+'  Got:'+repr(result))
         callback.__name__ = "expect_%s" % repr(expected)
         return callback
 
@@ -62,16 +64,16 @@ class TornadoTestCase(unittest.TestCase):
         source_line = '\n' + tb.format_stack()[-2]
         def callback(result):
             self.assertEqual(len(result), len(expected_list) )
-            for (e, d), (exp_e, exp_d)  in zip(result, expected_list):
+            for result, (exp_e, exp_d)  in zip(result, expected_list):
                 if exp_e:
-                    self.assertTrue( isinstance(e, exp_e),
-                        msg=source_line+'  Error:'+repr(e))
-                if callable(exp_d):
-                    self.assertTrue(exp_d(d),
-                        msg=source_line+'  Got:'+repr(d))
+                    self.assertTrue( isinstance(result, exp_e),
+                        msg=source_line+'  Error:'+repr(result))
+                elif callable(exp_d):
+                    self.assertTrue(exp_d(result),
+                        msg=source_line+'  Got:'+repr(result))
                 else:
-                    self.assertEqual(d, exp_d,
-                        msg=source_line+'  Got:'+repr(d))
+                    self.assertEqual(result, exp_d,
+                        msg=source_line+'  Got:'+repr(result))
         return callback
 
     def finish(self, *args):
@@ -81,6 +83,11 @@ class TornadoTestCase(unittest.TestCase):
         self.loop.start()
 
 class ServerCommandsTestCase(TornadoTestCase):
+    def test_setget_unicode(self):
+        self.client.set('foo', u'бар', self.expect(True))
+        self.client.get('foo', [self.expect('бар'), self.finish])
+        self.start()
+#"""
     def test_set(self):
         self.client.set('foo', 'bar', [self.expect(True), self.finish])
         self.start()
@@ -650,6 +657,6 @@ class ServerCommandsTestCase(TornadoTestCase):
             self.finish,
         ])
         self.start()
-
+#"""
 if __name__ == '__main__':
     unittest.main()

@@ -107,7 +107,10 @@ class CallbackDispatcher(object):
     def _send_result(self, results, single):
         try:
             result = results[0] if single else results
-            self.call(self.g.send(result))
+            if isinstance(result, Exception):
+                self.call(self.g.throw(result))
+            else:
+                self.call(self.g.send(result))
         except StopIteration:
             pass
 
