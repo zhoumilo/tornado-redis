@@ -23,7 +23,7 @@ def forward_error(callbacks, cleanup=None):
         log.error(e)
         if isinstance(callbacks, Iterable):
             for cb in callbacks:
-                callbacks(e)
+                cb(e)
         else:
             callbacks(e)
     finally:
@@ -407,7 +407,7 @@ class Client(object):
     @async
     @process
     def consume_bulk(self, length, callback):
-        with  forward_error(callback):
+        with forward_error(callback):
             data = yield async(self.connection.read)(length)
             if isinstance(data, Exception):
                 raise data
@@ -779,9 +779,7 @@ class Client(object):
         self.execute_command('SUBSCRIBE', callbacks, *channels)
 
     def on_subscribed(self, result):
-        (e, _) = result
-        if not e:
-            self.subscribed = True
+        self.subscribed = True
 
     def unsubscribe(self, channels, callbacks=None):
         callbacks = callbacks or []
@@ -791,31 +789,31 @@ class Client(object):
         self.execute_command('UNSUBSCRIBE', callbacks, *channels)
 
     def on_unsubscribed(self, result):
-        (e, _) = result
-        if not e:
-            self.subscribed = False
+        self.subscribed = False
 
     def publish(self, channel, message, callbacks=None):
         self.execute_command('PUBLISH', callbacks, channel, message)
 
     @process
     def listen(self, callbacks=None):
-        # 'LISTEN' is just for exception information, it is not actually sent anywhere
-        callbacks = callbacks or []
-        if not hasattr(callbacks, '__iter__'):
-            callbacks = [callbacks]
+        # 'LISTEN' is just for receiving information, it is not actually sent anywhere
+        with forward_error(callbacks):
+            callbacks = callbacks or []
+            if not hasattr(callbacks, '__iter__'):
+                callbacks = [callbacks]
 
-        yield self.connection.queue_wait()
-        cmd_listen = CmdLine('LISTEN')
-        while self.subscribed:
-            data = yield async(self.connection.readline)()
-            try:
-                error, response = yield self.process_data(data, cmd_listen)
+            yield self.connection.queue_wait()
+            cmd_listen = CmdLine('LISTEN')
+            while self.subscribed:
+                data = yield async(self.connection.readline)()
+                if isinstance(data, Exception):
+                    raise data
+
+                response = yield self.process_data(data, cmd_listen)
+                if isinstance(response, Exception):
+                    raise response
                 result = self.format_reply(cmd_listen, response)
-            except Exception, e:
-                error, result = e, None
-
-            self.call_callbacks(callbacks, (error, result) )
+                self.call_callbacks(callbacks, result)
 
     ### CAS
     def watch(self, key, callbacks=None):
