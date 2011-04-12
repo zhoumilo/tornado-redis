@@ -220,11 +220,21 @@ def reply_info(response):
 def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
 
+
+class _AsyncWrapper(object):
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __getattr__(self, item):
+        return async(getattr(self.obj, item), cbname='callbacks')
+
+
 class Client(object):
     def __init__(self, host='localhost', port=6379, password=None, reconnect=False, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
 
         self.connection = Connection(host, port, self.on_reconnect, io_loop=self._io_loop)
+        self.async = _AsyncWrapper(self)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False

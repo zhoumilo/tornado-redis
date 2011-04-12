@@ -5,7 +5,6 @@ import tornado.websocket
 import tornado.ioloop
 from brukva import adisp
 import logging
-from functools import partial
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -18,11 +17,7 @@ c.connect()
 
 
 def on_set(result):
-    (error, data) = result
-    log.debug("set result: %s" % (error or data,))
-
-
-async = partial(adisp.async, cbname='callbacks')
+    log.debug("set result: %s" % result)
 
 
 c.set('foo', 'Lorem ipsum #1', on_set)
@@ -34,9 +29,9 @@ class MainHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @adisp.process
     def get(self):
-        (_, foo) = yield async(c.get)('foo')
-        (_, bar) = yield async(c.get)('bar')
-        (_, zar) = yield async(c.get)('zar')
+        foo = yield c.async.get('foo')
+        bar = yield c.async.get('bar')
+        zar = yield c.async.get('zar')
         self.set_header('Content-Type', 'text/html')
         self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
 
