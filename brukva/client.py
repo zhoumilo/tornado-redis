@@ -23,7 +23,7 @@ def forward_error(callbacks, cleanup=None):
         log.error(e)
         if isinstance(callbacks, Iterable):
             for cb in callbacks:
-                callbacks(e)
+                cb(e)
         else:
             callbacks(e)
     finally:
