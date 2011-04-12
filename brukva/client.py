@@ -773,6 +773,8 @@ class Client(object):
     ### PUBSUB
     def subscribe(self, channels, callbacks=None):
         callbacks = callbacks or []
+        if not isinstance(callbacks, Iterable):
+            callbacks = [callbacks]
         if isinstance(channels, basestring):
             channels = [channels]
         callbacks = list(callbacks) + [self.on_subscribed]
@@ -783,6 +785,8 @@ class Client(object):
 
     def unsubscribe(self, channels, callbacks=None):
         callbacks = callbacks or []
+        if not isinstance(callbacks, Iterable):
+            callbacks = [callbacks]
         if isinstance(channels, basestring):
             channels = [channels]
         callbacks = list(callbacks) + [self.on_unsubscribed]

@@ -5,6 +5,7 @@ import unittest
 import sys
 from datetime import datetime
 import traceback as tb
+import time
 
 from tornado.ioloop import IOLoop
 
@@ -82,12 +83,13 @@ class TornadoTestCase(unittest.TestCase):
     def start(self):
         self.loop.start()
 
+
 class ServerCommandsTestCase(TornadoTestCase):
     def test_setget_unicode(self):
         self.client.set('foo', u'бар', self.expect(True))
         self.client.get('foo', [self.expect('бар'), self.finish])
         self.start()
-#"""
+
     def test_set(self):
         self.client.set('foo', 'bar', [self.expect(True), self.finish])
         self.start()
@@ -657,6 +659,39 @@ class ServerCommandsTestCase(TornadoTestCase):
             self.finish,
         ])
         self.start()
-#"""
+
+class PubSubTestCase(TornadoTestCase):
+    def setUp(self, *args, **kwargs):
+        super(PubSubTestCase, self).setUp(*args, **kwargs)
+        self.client2 = brukva.Client(io_loop=self.loop)
+        self.client2.connection.connect()
+        self.client2.select(9)
+
+    def test_pub_sub(self):
+        def on_recv(msg):
+            self.assertEqual(msg.kind, 'message')
+            self.assertEqual(msg.channel, 'foo')
+            self.assertEqual(msg.body, 'bar')
+
+        def on_subscription(msg):
+            self.assertEqual(msg.kind, 'subscribe')
+            self.assertEqual(msg.channel, 'foo')
+            self.assertEqual(msg.body, 1)
+
+            self.client2.listen(on_recv)
+
+        self.client2.subscribe('foo', on_subscription)
+        self.loop.add_timeout(time.time()+0.1, lambda:
+            self.client.publish('foo', 'bar', None)
+        )
+        self.loop.add_timeout(time.time()+0.2, lambda:
+            self.client.publish('foo', 'bar',
+                lambda *args:
+                    self.loop.add_timeout(time.time()+0.1, self.finish)
+            )
+        )
+        self.start()
+
+
 if __name__ == '__main__':
     unittest.main()
