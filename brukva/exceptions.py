@@ -12,7 +12,9 @@ class ResponseError(RedisError):
         self.cmd_line = cmd_line
 
     def __repr__(self):
-        return 'ResponseError (on %s [%s, %s]): %s' % (self.cmd_line.cmd, self.cmd_line.args, self.cmd_line.kwargs, self.message)
+        if self.cmd_line:
+            return 'ResponseError (on %s [%s, %s]): %s' % (self.cmd_line.cmd, self.cmd_line.args, self.cmd_line.kwargs, self.message)
+        return 'ResponseError: %s' % self.message
 
     __str__ = __repr__
 

@@ -322,7 +322,7 @@ class Client(object):
         except Exception, e:
             raise ResponseError(
                 'failed to format reply to %s, raw data: %s; err message: %s' %
-                cmd_line, data, e
+                (cmd_line, data, e), cmd_line
             )
         return res
     ####
@@ -396,9 +396,7 @@ class Client(object):
                         tail = tail[4:]
                     response = ResponseError(tail, cmd_line)
                 else:
-                    raise ResponseError('Unknown response type %s' %
-                        (head, cmd_line)
-                    )
+                    raise ResponseError('Unknown response type %s' % head, cmd_line)
 
             callback(response)
 
@@ -412,7 +410,7 @@ class Client(object):
                 if not data:
                     raise ResponseError(
                         'Not enough data in response to %s, accumulated tokens: %s'%
-                        (cmd_line, tokens)
+                        (cmd_line, tokens), cmd_line
                     )
                 token = yield self.process_data(data, cmd_line) #FIXME error
                 tokens.append( token )
@@ -426,7 +424,7 @@ class Client(object):
             if isinstance(data, Exception):
                 raise data
             if not data:
-                raise ResponseError('EmptyResponse')
+                raise ResponseError('EmptyResponse', None)
             else:
                 data = data[:-2]
             callback(data)
@@ -892,7 +890,7 @@ class Pipeline(Client):
             while len(responses) < total:
                 data = yield async(self.connection.readline)()
                 if not data:
-                    raise ResponseError('Not enough data after EXEC')
+                    raise ResponseError('Not enough data after EXEC', None)
 
                 try:
                     cmd_line = cmds.next()
