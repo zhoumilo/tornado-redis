@@ -225,9 +225,12 @@ def reply_ttl(r, *args, **kwargs):
 class _AsyncWrapper(object):
     def __init__(self, obj):
         self.obj = obj
+        self.memoized = {}
 
     def __getattr__(self, item):
-        return async(getattr(self.obj, item), cbname='callbacks')
+        if item not in self.memoized:
+            self.memoized[item] = async(getattr(self.obj, item), cbname='callbacks')
+        return self.memoized[item]
 
 
 class Client(object):
