@@ -10,6 +10,7 @@ import time
 from tornado.ioloop import IOLoop
 
 import brukva
+from brukva.adisp import process, async
 from brukva.exceptions import ResponseError
 
 def callable(obj):
@@ -692,6 +693,20 @@ class PubSubTestCase(TornadoTestCase):
         )
         self.start()
 
+class AsyncWrapperTestCase(TornadoTestCase):
+    def test_wrapper(self):
+        @process
+        def simulate(client, callbacks):
+            res = yield client.async.set('foo1', 'bar')
+            self.assertEquals(res, True)
+            res = yield client.async.set('foo2', 'zar')
+            self.assertEquals(res, True)
+            r1, r2 = yield [client.async.get('foo1'), client.async.get('foo2')]
+            self.assertEquals(r1, 'bar')
+            self.assertEquals(r2, 'zar')
+            callbacks(None)
+        self.loop.add_callback(lambda: simulate(self.client, self.finish))
+        self.start()
 
 if __name__ == '__main__':
     unittest.main()
