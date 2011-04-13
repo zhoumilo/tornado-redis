@@ -1,33 +1,37 @@
 brükva
 ========
 
-Asynchronous [Redis](http://redis-db.com/) client that works within [Tornado](http://tornadoweb.org/) IO loop.
+Asynchronous [Redis](http://redis.io/) client that works within [Tornado](http://tornadoweb.org/) IO loop.
 
 
 Usage
 -----
 
-    >>> import brukva
-    >>> c = brukva.Client()
-    >>> c.connect()
-    >>> def on_result(result):
-           (error, data) = result
-           print data or error
-    >>> c.set('foo', 'bar', on_result)
-    >>> c.get('foo', on_result)
-    >>> c.hgetall('foo', on_result)
-    >>> c.connection._stream.io_loop.start() # start tornado mainloop
+Input:
+    import logging
+    logging.basicConfig()
+    import brukva
+    c = brukva.Client()
+    c.connect()
+    def on_result(result):
+        print result
+    c.set('foo', 'bar', on_result)
+    c.get('foo', on_result)
+    c.hgetall('foo', on_result)
+    c.connection._stream.io_loop.start() # start tornado mainloop
+
+Output:
     True
     bar
+    ERROR:brukva.client:ResponseError (on HGETALL [('foo',), {}]): Operation against a key holding the wrong kind of value
     ResponseError (on HGETALL [('foo',), {}]): Operation against a key holding the wrong kind of value
-
 
 Tips on testing
 ---------------
 
 Run tests with the following command:
 
-    nosetests -s -w tests --nologcapture
+    ./run_nose.sh
 
 
 Credits
