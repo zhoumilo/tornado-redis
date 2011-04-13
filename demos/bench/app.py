@@ -3,20 +3,17 @@ import tornado.httpserver
 import tornado.web
 import tornado.websocket
 import tornado.ioloop
-from functools import partial
 import redis
 
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
 
-r = redis.Redis(db=9)
+r = redis.Redis(REDIS_HOST, REDIS_PORT, db=9)
 
-
-async = partial(brukva.adisp.async, cbname='callbacks')
-
-
-c = brukva.Client()
+c = brukva.Client(REDIS_HOST, REDIS_PORT)
 c.connect()
-
 c.select(9)
+
 c.set('foo', 'bar')
 c.set('foo2', 'bar2')
 
@@ -25,7 +22,7 @@ class BrukvaHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
     @brukva.adisp.process
     def get(self):
-        ((_, foo), (_, foo2)) = yield [ async(c.get)('foo'), async(c.get)('foo2') ]
+        foo, foo2 = yield [c.async.get('foo'), c.async.get('foo2')]
         self.set_header('Content-Type', 'text/plain')
         self.write(foo)
         self.write(foo2)
