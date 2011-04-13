@@ -5,6 +5,7 @@ from itertools import izip
 import contextlib
 import logging
 from collections import Iterable
+import weakref
 
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
@@ -234,7 +235,7 @@ class Client(object):
         self._io_loop = io_loop or IOLoop.instance()
 
         self.connection = Connection(host, port, self.on_reconnect, io_loop=self._io_loop)
-        self.async = _AsyncWrapper(self)
+        self.async = _AsyncWrapper(weakref.proxy(self))
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
