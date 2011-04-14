@@ -78,6 +78,9 @@ class TornadoTestCase(unittest.TestCase):
                         msg=source_line+'  Got:'+repr(result))
         return callback
 
+    def delayed(self, timeout, cb):
+        self.loop.add_timeout(time.time()+timeout, cb)
+
     def finish(self, *args):
         self.loop.stop()
 
@@ -711,6 +714,17 @@ class AsyncWrapperTestCase(TornadoTestCase):
             self.assertEquals(r2, 'zar')
             callbacks(None)
         self.loop.add_callback(lambda: simulate(self.client, self.finish))
+        self.start()
+
+class ReconnectTestCase(TornadoTestCase):
+    def test_run_stop_redis(self):
+        self.client.set('foo', 'bar', self.expect(True))
+        self.delayed(10, lambda:
+            self.client.get('foo', [
+                self.expect('bar'),
+                self.finish
+            ])
+        )
         self.start()
 
 if __name__ == '__main__':
