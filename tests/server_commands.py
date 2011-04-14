@@ -13,6 +13,7 @@ import brukva
 from brukva.adisp import process, async
 from brukva.exceptions import ResponseError
 
+import logging; logging.basicConfig()
 def callable(obj):
     return hasattr(obj, '__call__')
 
@@ -716,8 +717,9 @@ class AsyncWrapperTestCase(TornadoTestCase):
         self.loop.add_callback(lambda: simulate(self.client, self.finish))
         self.start()
 
+
 class ReconnectTestCase(TornadoTestCase):
-    def test_run_stop_redis(self):
+    def test_redis_timeout(self):
         self.client.set('foo', 'bar', self.expect(True))
         self.delayed(10, lambda:
             self.client.get('foo', [
@@ -726,6 +728,22 @@ class ReconnectTestCase(TornadoTestCase):
             ])
         )
         self.start()
+
+    def test_redis_timeout_with_pipe(self):
+        self.client.set('foo', 'bar', self.expect(True))
+        pipe = self.client.pipeline(transactional=True)
+        pipe.get('foo')
+
+        self.delayed(10, lambda:
+            pipe.execute([
+                self.pexpect([
+                    'bar',
+                ]),
+                self.finish,
+            ])
+        )
+        self.start()
+
 
 if __name__ == '__main__':
     unittest.main()
