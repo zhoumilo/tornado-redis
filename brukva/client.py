@@ -424,7 +424,7 @@ class Client(object):
             if isinstance(data, Exception):
                 raise data
             if not data:
-                raise ResponseError('EmptyResponse', None)
+                raise ResponseError('EmptyResponse')
             else:
                 data = data[:-2]
             callback(data)
@@ -890,7 +890,7 @@ class Pipeline(Client):
             while len(responses) < total:
                 data = yield async(self.connection.readline)()
                 if not data:
-                    raise ResponseError('Not enough data after EXEC', None)
+                    raise ResponseError('Not enough data after EXEC')
 
                 try:
                     cmd_line = cmds.next()

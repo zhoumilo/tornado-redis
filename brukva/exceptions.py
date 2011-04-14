@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 class RedisError(Exception):
     pass
 
@@ -7,7 +10,7 @@ class ConnectionError(RedisError):
 
 
 class ResponseError(RedisError):
-    def __init__(self, message, cmd_line):
+    def __init__(self, message, cmd_line=None):
         self.message = message
         self.cmd_line = cmd_line
 

@@ -661,6 +661,11 @@ class ServerCommandsTestCase(TornadoTestCase):
         ])
         self.start()
 
+    def test_response_error(self):
+        self.client.set('foo', 'bar', self.expect(True))
+        self.client.llen('foo', [self.expect(ResponseError), self.finish])
+        self.start()
+
 class PubSubTestCase(TornadoTestCase):
     def setUp(self, *args, **kwargs):
         super(PubSubTestCase, self).setUp(*args, **kwargs)
