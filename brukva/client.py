@@ -110,12 +110,6 @@ class Connection(object):
         else:
             self._stream.write(data)
 
-    def consume(self, length):
-        if not self._stream:
-            self.on_reconnect()
-            if not self._stream:
-                raise ConnectionError('Tried to consume from non-existent connection')
-        self._stream.read_bytes(length, NOOP_CB)
 
     def read(self, length, callback):
         try:
