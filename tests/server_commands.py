@@ -485,6 +485,9 @@ class ServerCommandsTestCase(TornadoTestCase):
                                                        self.finish()])
         self.start()
 
+
+
+class PipelineTestCase(TornadoTestCase):
     ### Pipeline ###
     def test_pipe_simple(self):
         pipe = self.client.pipeline()
