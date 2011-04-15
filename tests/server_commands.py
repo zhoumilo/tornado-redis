@@ -13,6 +13,7 @@ import brukva
 from brukva.adisp import process, async
 from brukva.exceptions import ResponseError
 
+import logging; logging.basicConfig()
 def callable(obj):
     return hasattr(obj, '__call__')
 
@@ -65,6 +66,9 @@ class TornadoTestCase(unittest.TestCase):
 
         source_line = '\n' + tb.format_stack()[-2]
         def callback(result):
+            if isinstance(result, Exception):
+                self.fail('got exception %s' % result)
+
             self.assertEqual(len(result), len(expected_list) )
             for result, (exp_e, exp_d)  in zip(result, expected_list):
                 if exp_e:
@@ -78,7 +82,10 @@ class TornadoTestCase(unittest.TestCase):
                         msg=source_line+'  Got:'+repr(result))
         return callback
 
-    def finish(self, *args):
+    def delayed(self, timeout, cb):
+        self.loop.add_timeout(time.time()+timeout, cb)
+
+    def finish(self, *args, **kwargs):
         self.loop.stop()
 
     def start(self):
@@ -481,6 +488,9 @@ class ServerCommandsTestCase(TornadoTestCase):
                                                        self.finish()])
         self.start()
 
+
+
+class PipelineTestCase(TornadoTestCase):
     ### Pipeline ###
     def test_pipe_simple(self):
         pipe = self.client.pipeline()
@@ -538,6 +548,7 @@ class ServerCommandsTestCase(TornadoTestCase):
 
         pipe.execute([self.pexpect(['123', {'zar': 'gza'}]), self.finish])
         self.start()
+
 
     def test_mix_with_pipe_multi(self):
         pipe = self.client.pipeline(transactional=True)
@@ -603,6 +614,7 @@ class ServerCommandsTestCase(TornadoTestCase):
             ]),
             self.finish,
         ])
+        self.start()
 
     def test_pipe_zsets2(self):
         pipe = self.client.pipeline(transactional=False)
@@ -683,14 +695,10 @@ class PubSubTestCase(TornadoTestCase):
             self.assertEqual(msg.kind, 'subscribe')
             self.assertEqual(msg.channel, 'foo')
             self.assertEqual(msg.body, 1)
-
             self.client2.listen(on_recv)
 
         self.client2.subscribe('foo', on_subscription)
         self.loop.add_timeout(time.time()+0.1, lambda:
-            self.client.publish('foo', 'bar', None)
-        )
-        self.loop.add_timeout(time.time()+0.2, lambda:
             self.client.publish('foo', 'bar',
                 lambda *args:
                     self.loop.add_timeout(time.time()+0.1, self.finish)
@@ -711,6 +719,33 @@ class AsyncWrapperTestCase(TornadoTestCase):
             self.assertEquals(r2, 'zar')
             callbacks(None)
         self.loop.add_callback(lambda: simulate(self.client, self.finish))
+        self.start()
+
+
+class ReconnectTestCase(TornadoTestCase):
+    def test_redis_timeout(self):
+        self.client.set('foo', 'bar', self.expect(True))
+        self.delayed(10, lambda:
+            self.client.get('foo', [
+                self.expect('bar'),
+                self.finish
+            ])
+        )
+        self.start()
+
+    def test_redis_timeout_with_pipe(self):
+        self.client.set('foo', 'bar', self.expect(True))
+        pipe = self.client.pipeline(transactional=True)
+        pipe.get('foo')
+
+        self.delayed(10, lambda:
+            pipe.execute([
+                self.pexpect([
+                    'bar',
+                ]),
+                self.finish,
+            ])
+        )
         self.start()
 
 if __name__ == '__main__':
