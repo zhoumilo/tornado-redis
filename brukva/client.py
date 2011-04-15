@@ -16,20 +16,36 @@ from brukva.exceptions import RedisError, ConnectionError, ResponseError, Invali
 
 log = logging.getLogger('brukva.client')
 
-@contextlib.contextmanager
-def forward_error(callbacks, cleanup=None):
-    try:
-        yield callbacks
-    except Exception, e:
-        log.error(e)
-        if isinstance(callbacks, Iterable):
-            for cb in callbacks:
-                cb(e)
+class ForwardErrorManager(object):
+    def __init__(self, callbacks):
+        self.callbacks = callbacks
+        self.is_active = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, tb):
+        if type is None:
+            return True
+
+        if self.is_active:
+            if isinstance(self.callbacks, Iterable):
+                for cb in self.callbacks:
+                    cb(value)
+            else:
+                self.callbacks(value)
+            return True
         else:
-            callbacks(e)
-    finally:
-        if cleanup:
-            cleanup()
+            return False
+
+    def disable(self):
+        self.is_active = False
+
+    def enable(self):
+        self.is_active = True
+
+def forward_error(callbacks):
+    return ForwardErrorManager(callbacks)
 
 class Message(object):
     def __init__(self, kind, channel, body):
