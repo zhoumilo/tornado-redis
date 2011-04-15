@@ -45,6 +45,17 @@ class ForwardErrorManager(object):
         self.is_active = True
 
 def forward_error(callbacks):
+    """
+    Syntax sugar.
+    If some error occurred inside with block,
+    it will be suppressed and forwarded to callbacks.
+
+    Error handling can be disabled using context.disable(),
+    and re enabled again using context.enable().
+
+    @type callbacks: callable or iterator over callables
+    @rtype: context
+    """
     return ForwardErrorManager(callbacks)
 
 class Message(object):
@@ -134,7 +145,7 @@ class Connection(object):
             try:
                 #print('try to write: %s'% data)
                 self._stream.write(data)
-            except IOError, e:
+            except IOError:
                 self.disconnect()
                 self.write(data, try_left - 1)
         else:
@@ -322,7 +333,6 @@ class Client(object):
             self.select(self.selected_db)
 
     def on_disconnect(self, callbacks):
-        self.pipeline().discard()
         raise ConnectionError("Socket closed on remote end")
     ####
 
@@ -363,7 +373,7 @@ class Client(object):
     @process
     def execute_command(self, cmd, callbacks, *args, **kwargs):
         result = None
-        with forward_error(callbacks) as forward:
+        with forward_error(callbacks):
             if callbacks is None:
                 callbacks = []
             elif not hasattr(callbacks, '__iter__'):
