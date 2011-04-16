@@ -339,7 +339,7 @@ class Client(object):
         if self.selected_db:
             self.select(self.selected_db)
 
-    def on_disconnect(self, callbacks):
+    def on_disconnect(self):
         raise ConnectionError("Socket closed on remote end")
     ####
 
