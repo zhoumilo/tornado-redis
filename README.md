@@ -14,13 +14,11 @@ Input:
     c = brukva.Client()
     c.connect()
     loop = c.connection._stream.io_loop
-
     def on_result(result):
         print result
     c.set('foo', 'bar', on_result)
     c.get('foo', on_result)
-    c.hgetall('foo', [on_result, lambda r: loop.stop()] )
-
+    c.hgetall('foo', [on_result, lambda r: loop.stop()])
     loop.start() # start tornado mainloop
 
 Output:

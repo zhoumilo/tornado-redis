@@ -2,7 +2,6 @@
 import socket
 from functools import partial
 from itertools import izip
-import contextlib
 import logging
 from collections import Iterable
 import weakref
@@ -16,10 +15,18 @@ from brukva.exceptions import RedisError, ConnectionError, ResponseError, Invali
 
 log = logging.getLogger('brukva.client')
 
-class ForwardErrorManager(object):
+class ExecutionContext(object):
     def __init__(self, callbacks):
         self.callbacks = callbacks
         self.is_active = True
+
+    def _call_callbacks(self, value):
+        if self.callbacks:
+            if isinstance(self.callbacks, Iterable):
+                for cb in self.callbacks:
+                    cb(value)
+            else:
+                self.callbacks(value)
 
     def __enter__(self):
         return self
@@ -29,11 +36,7 @@ class ForwardErrorManager(object):
             return True
 
         if self.is_active:
-            if isinstance(self.callbacks, Iterable):
-                for cb in self.callbacks:
-                    cb(value)
-            else:
-                self.callbacks(value)
+            self._call_callbacks(value)
             return True
         else:
             return False
@@ -44,19 +47,23 @@ class ForwardErrorManager(object):
     def enable(self):
         self.is_active = True
 
-def forward_error(callbacks):
+    def ret_call(self, value):
+        self.is_active = False
+        self._call_callbacks(value)
+        self.is_active = True
+
+def execution_context(callbacks):
     """
     Syntax sugar.
     If some error occurred inside with block,
     it will be suppressed and forwarded to callbacks.
 
-    Error handling can be disabled using context.disable(),
-    and re enabled again using context.enable().
+    Use contex.ret_call(value) method to call callbacks.
 
     @type callbacks: callable or iterator over callables
     @rtype: context
     """
-    return ForwardErrorManager(callbacks)
+    return ExecutionContext(callbacks)
 
 class Message(object):
     def __init__(self, kind, channel, body):
@@ -372,8 +379,7 @@ class Client(object):
 
     @process
     def execute_command(self, cmd, callbacks, *args, **kwargs):
-        result = None
-        with forward_error(callbacks):
+        with execution_context(callbacks) as ctx:
             if callbacks is None:
                 callbacks = []
             elif not hasattr(callbacks, '__iter__'):
@@ -400,13 +406,12 @@ class Client(object):
                 result = self.format_reply(cmd_line, response)
 
                 self.connection.read_done()
-
-        self.call_callbacks(callbacks, result)
+            ctx.ret_call(result)
 
     @async
     @process
     def process_data(self, data, cmd_line, callback):
-        with forward_error(callback):
+        with execution_context(callback) as ctx:
             data = data[:-2] # strip \r\n
 
             if data == '$-1':
@@ -432,13 +437,12 @@ class Client(object):
                     response = ResponseError(tail, cmd_line)
                 else:
                     raise ResponseError('Unknown response type %s' % head, cmd_line)
-
-        callback(response)
+            ctx.ret_call(response)
 
     @async
     @process
     def consume_multibulk(self, length, cmd_line, callback):
-        with forward_error(callback):
+        with execution_context(callback) as ctx:
             tokens = []
             while len(tokens) < length:
                 data = yield async(self.connection.readline)()
@@ -449,12 +453,13 @@ class Client(object):
                     )
                 token = yield self.process_data(data, cmd_line) #FIXME error
                 tokens.append( token )
-        callback(tokens)
+
+            ctx.ret_call(tokens)
 
     @async
     @process
     def consume_bulk(self, length, callback):
-        with forward_error(callback):
+        with execution_context(callback) as ctx:
             data = yield async(self.connection.read)(length)
             if isinstance(data, Exception):
                 raise data
@@ -462,7 +467,7 @@ class Client(object):
                 raise ResponseError('EmptyResponse')
             else:
                 data = data[:-2]
-        callback(data)
+            ctx.ret_call(data)
         ####
 
     ### MAINTENANCE
@@ -849,7 +854,7 @@ class Client(object):
     @process
     def listen(self, callbacks=None):
         # 'LISTEN' is just for receiving information, it is not actually sent anywhere
-        with forward_error(callbacks) as forward:
+        with execution_context(callbacks) as ctx:
             callbacks = callbacks or []
             if not hasattr(callbacks, '__iter__'):
                 callbacks = [callbacks]
@@ -865,10 +870,8 @@ class Client(object):
                 if isinstance(response, Exception):
                     raise response
                 result = self.format_reply(cmd_listen, response)
+                ctx.ret_call(result)
 
-                forward.disable()
-                self.call_callbacks(callbacks, result)
-                forward.enable()
     ### CAS
     def watch(self, key, callbacks=None):
         self.execute_command('WATCH', callbacks, key)
@@ -902,8 +905,7 @@ class Pipeline(Client):
 
     @process
     def execute(self, callbacks):
-        results = None
-        with forward_error(callbacks):
+        with execution_context(callbacks) as ctx:
             command_stack = self.command_stack
             self.command_stack = []
 
@@ -967,4 +969,4 @@ class Pipeline(Client):
             else:
                 results = format_replies(command_stack, responses)
 
-        self.call_callbacks(callbacks, results)
+            ctx.ret_call(results)
