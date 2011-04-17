@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 
 import brukva
 from brukva.adisp import process, async
-from brukva.exceptions import ResponseError
+from brukva.exceptions import ResponseError, RequestError
 
 import logging; logging.basicConfig()
 def callable(obj):
@@ -43,7 +43,7 @@ class TornadoTestCase(unittest.TestCase):
         self.client.flushdb()
 
     def tearDown(self):
-        pass
+        del self.client
 
     def expect(self, expected):
         source_line = '\n' + tb.format_stack()[-2]
@@ -685,11 +685,69 @@ class PubSubTestCase(TornadoTestCase):
         self.client2.connection.connect()
         self.client2.select(9)
 
+    def tearDown(self):
+        super(PubSubTestCase, self).tearDown()
+        del self.client2
+
+    def assert_pubsub(self, msg, kind, channel, body):
+        self.assertEqual(msg.kind, kind)
+        self.assertEqual(msg.channel, channel)
+        self.assertEqual(msg.body, body)
+
     def test_pub_sub(self):
         def on_recv(msg):
-            self.assertEqual(msg.kind, 'message')
-            self.assertEqual(msg.channel, 'foo')
-            self.assertEqual(msg.body, 'bar')
+            self.assert_pubsub(msg, 'message', 'foo', 'bar')
+
+        def on_subscription(msg):
+            self.assert_pubsub(msg, 'subscribe', 'foo', 1)
+            self.client2.listen(on_recv)
+
+        self.client2.subscribe('foo', on_subscription)
+        self.delayed(0.1, lambda:
+            self.client2.set('gtx', 'rd', self.expect(RequestError)))
+        self.delayed(0.2, lambda:
+            self.client.publish('foo', 'bar',
+                lambda *args: self.delayed(0.4, self.finish))
+        )
+        self.start()
+
+    def test_unsubscribe(self):
+        global c
+        c = 0
+        def on_recv(msg):
+            if isinstance(msg, Exception):
+                self.fail('Got unexpected exception: %s' % msg)
+
+            global c
+            if c == 0:
+                self.assert_pubsub(msg, 'message', 'foo', 'bar')
+            elif c == 1:
+                self.assert_pubsub(msg, 'subscribe', 'so', 2)
+            elif c == 2:
+                self.assert_pubsub(msg, 'unsubscribe', 'foo', 1)
+            elif c == 3:
+                self.assert_pubsub(msg, 'message', 'so', 'much')
+            elif c == 4:
+                self.assert_pubsub(msg, 'unsubscribe', 'so', 0)
+            c += 1
+
+        def on_subscription(msg):
+            self.assert_pubsub(msg, 'subscribe', 'foo', 1)
+            self.client2.listen(on_recv)
+
+        self.client2.subscribe('foo', on_subscription)
+        self.delayed(0.1, lambda: self.client.publish('foo', 'bar'))
+        self.delayed(0.2, lambda: self.client2.subscribe('so'))
+        self.delayed(0.3, lambda: self.client2.unsubscribe('foo'))
+        self.delayed(0.4, lambda: self.client.publish('so', 'much'))
+        self.delayed(0.5, lambda: self.client2.unsubscribe('so'))
+        self.delayed(0.6, lambda: self.client2.set('zar', 'xar', [self.expect(True), self.finish]))
+        self.start()
+
+
+    def test_pub_sub_disconnect(self):
+        def on_recv(msg):
+            self.assertIsInstance(msg, brukva.exceptions.ConnectionError)
 
         def on_subscription(msg):
             self.assertEqual(msg.kind, 'subscribe')
@@ -698,12 +756,8 @@ class PubSubTestCase(TornadoTestCase):
             self.client2.listen(on_recv)
 
         self.client2.subscribe('foo', on_subscription)
-        self.loop.add_timeout(time.time()+0.1, lambda:
-            self.client.publish('foo', 'bar',
-                lambda *args:
-                    self.loop.add_timeout(time.time()+0.1, self.finish)
-            )
-        )
+        self.delayed(0.2, lambda: self.client2.disconnect())
+        self.delayed(0.3, self.finish)
         self.start()
 
 class AsyncWrapperTestCase(TornadoTestCase):
