@@ -11,13 +11,14 @@ from tornado.iostream import IOStream
 from adisp import async, process
 
 from datetime import datetime
-from brukva.exceptions import RedisError, ConnectionError, ResponseError, InvalidResponse
+from brukva.exceptions import RequestError, ConnectionError, ResponseError, InvalidResponse
 
 log = logging.getLogger('brukva.client')
 
 class ExecutionContext(object):
-    def __init__(self, callbacks):
+    def __init__(self, callbacks, error_wrapper=None):
         self.callbacks = callbacks
+        self.error_wrapper = error_wrapper
         self.is_active = True
 
     def _call_callbacks(self, value):
@@ -35,8 +36,11 @@ class ExecutionContext(object):
         if type is None:
             return True
 
+        if self.error_wrapper:
+            value = self.error_wrapper(value)
+
         if self.is_active:
-            self._call_callbacks(value)
+            self.ret_call(value)
             return True
         else:
             return False
@@ -52,7 +56,7 @@ class ExecutionContext(object):
         self._call_callbacks(value)
         self.is_active = True
 
-def execution_context(callbacks):
+def execution_context(callbacks, error_wrapper=None):
     """
     Syntax sugar.
     If some error occurred inside with block,
@@ -63,7 +67,7 @@ def execution_context(callbacks):
     @type callbacks: callable or iterator over callables
     @rtype: context
     """
-    return ExecutionContext(callbacks)
+    return ExecutionContext(callbacks, error_wrapper)
 
 class Message(object):
     def __init__(self, kind, channel, body):
@@ -257,6 +261,12 @@ def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
 
 
+PUB_SUB_COMMANDS = set([
+    'SUBSCRIBE',
+    'UNSUBSCRIBE',
+    'LISTEN',
+])
+
 class _AsyncWrapper(object):
     def __init__(self, obj):
         self.obj = obj
@@ -340,6 +350,8 @@ class Client(object):
             self.select(self.selected_db)
 
     def on_disconnect(self):
+        if self.subscribed:
+            self.subscribed = False
         raise ConnectionError("Socket closed on remote end")
     ####
 
@@ -379,23 +391,28 @@ class Client(object):
 
     @process
     def execute_command(self, cmd, callbacks, *args, **kwargs):
+        cmd_line = CmdLine(cmd, *args, **kwargs)
         with execution_context(callbacks) as ctx:
             if callbacks is None:
                 callbacks = []
             elif not hasattr(callbacks, '__iter__'):
                 callbacks = [callbacks]
 
+            if self.subscribed and cmd not in PUB_SUB_COMMANDS:
+                ctx.ret_call(RequestError('Calling not pub/sub command during subscribed state', cmd_line))
+                return
+
             try:
                 self.connection.write(self.format(cmd, *args, **kwargs))
-            except IOError, e:
-                self._sudden_disconnect(callbacks)
             except Exception, e:
                 self.connection.disconnect()
                 raise e
 
-            cmd_line = CmdLine(cmd, *args, **kwargs)
-            yield self.connection.queue_wait()
+            if cmd == 'UNSUBSCRIBE' or self.subscribed and cmd == 'SUBSCRIBE':
+                ctx.ret_call(True)
+                return
 
+            yield self.connection.queue_wait()
             data = yield async(self.connection.readline)()
             if not data:
                 result = None
@@ -842,10 +859,10 @@ class Client(object):
             callbacks = [callbacks]
         if isinstance(channels, basestring):
             channels = [channels]
-        callbacks = list(callbacks) + [self.on_unsubscribed]
+        callbacks = list(callbacks)
         self.execute_command('UNSUBSCRIBE', callbacks, *channels)
 
-    def on_unsubscribed(self, result):
+    def on_unsubscribed(self, *args, **kwargs):
         self.subscribed = False
 
     def publish(self, channel, message, callbacks=None):
@@ -854,12 +871,18 @@ class Client(object):
     @process
     def listen(self, callbacks=None):
         # 'LISTEN' is just for receiving information, it is not actually sent anywhere
-        with execution_context(callbacks) as ctx:
+        def error_wrapper(e):
+            if isinstance(e, GeneratorExit):
+                return ConnectionError('Connection lost')
+            else:
+                return e
+
+        with execution_context(callbacks, error_wrapper) as ctx:
             callbacks = callbacks or []
             if not hasattr(callbacks, '__iter__'):
                 callbacks = [callbacks]
-
             yield self.connection.queue_wait()
+
             cmd_listen = CmdLine('LISTEN')
             while self.subscribed:
                 data = yield async(self.connection.readline)()
@@ -869,8 +892,16 @@ class Client(object):
                 response = yield self.process_data(data, cmd_listen)
                 if isinstance(response, Exception):
                     raise response
+
                 result = self.format_reply(cmd_listen, response)
-                ctx.ret_call(result)
+
+                if result.kind == 'unsubscribe' and result.body == 0:
+                    self.on_unsubscribed()
+                    self.connection.read_done()
+                    ctx.ret_call(result)
+                    break
+                else:
+                    ctx.ret_call(result)
 
     ### CAS
     def watch(self, key, callbacks=None):
@@ -887,21 +918,14 @@ class Pipeline(Client):
 
     def execute_command(self, cmd, callbacks, *args, **kwargs):
         if cmd in ('AUTH', 'SELECT'):
-            raise RuntimeError('cmd %s must not be in pipe ' % cmd)
+            super(Pipeline, self).execute_command(cmd, callbacks, *args, **kwargs)
+        elif cmd in PUB_SUB_COMMANDS:
+            raise RequestError(
+                'Client is not supposed to issue command %s in pipeline ' % cmd)
         self.command_stack.append(CmdLine(cmd, *args, **kwargs))
 
     def discard(self): # actually do nothing with redis-server, just flush command_stack
         self.command_stack = []
-
-    ###
-    def select(self, db, callbacks=None):
-        self.selected_db = db
-        super(Pipeline, self).execute_command('SELECT', callbacks, db)
-
-    def auth(self, password, callbacks=None):
-        super(Pipeline, self).execute_command('AUTH', callbacks, password)
-    ###
-
 
     @process
     def execute(self, callbacks):
