@@ -749,9 +749,14 @@ class PubSubTestCase(TornadoTestCase):
             self.assertEqual(msg.body, 1)
             self.client2.listen(on_recv)
 
+        def on_publish(value):
+            self.assertIsNotNone(value)
+
         self.client2.subscribe('foo', on_subscription)
         self.delayed(0.2, lambda: self.client2.disconnect())
-        self.delayed(0.3, self.finish)
+        self.delayed(0.3, lambda: self.client.publish('foo', 'bar', on_publish))
+        self.delayed(0.4, lambda: self.client2.publish('foo', 'bar', on_publish))
+        self.delayed(0.5, self.finish)
         self.start()
 
 class AsyncWrapperTestCase(TornadoTestCase):

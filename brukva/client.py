@@ -5,6 +5,7 @@ from itertools import izip
 import logging
 from collections import Iterable, defaultdict
 import weakref
+import traceback
 
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
@@ -32,14 +33,20 @@ class ExecutionContext(object):
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, tb):
-        if type is None:
+    def __exit__(self, type_, value, tb):
+        if type_ is None:
             return True
 
         if self.error_wrapper:
             value = self.error_wrapper(value)
+        else:
+            value = value or Exception(
+                'Strange exception with None value type: %s; tb: %s' %
+                (type_, '\n'.join(traceback.format_tb(tb))
+            ))
 
         if self.is_active:
+            log.error(value, exc_info=(type_, value, tb))
             self.ret_call(value)
             return True
         else:
