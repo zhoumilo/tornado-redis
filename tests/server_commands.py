@@ -722,13 +722,7 @@ class PubSubTestCase(TornadoTestCase):
             if c == 0:
                 self.assert_pubsub(msg, 'message', 'foo', 'bar')
             elif c == 1:
-                self.assert_pubsub(msg, 'subscribe', 'so', 2)
-            elif c == 2:
-                self.assert_pubsub(msg, 'unsubscribe', 'foo', 1)
-            elif c == 3:
                 self.assert_pubsub(msg, 'message', 'so', 'much')
-            elif c == 4:
-                self.assert_pubsub(msg, 'unsubscribe', 'so', 0)
             c += 1
 
         def on_subscription(msg):
@@ -737,7 +731,7 @@ class PubSubTestCase(TornadoTestCase):
 
         self.client2.subscribe('foo', on_subscription)
         self.delayed(0.1, lambda: self.client.publish('foo', 'bar'))
-        self.delayed(0.2, lambda: self.client2.subscribe('so'))
+        self.delayed(0.2, lambda: self.client2.subscribe('so',))
         self.delayed(0.3, lambda: self.client2.unsubscribe('foo'))
         self.delayed(0.4, lambda: self.client.publish('so', 'much'))
         self.delayed(0.5, lambda: self.client2.unsubscribe('so'))
