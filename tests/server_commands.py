@@ -711,6 +711,26 @@ class PubSubTestCase(TornadoTestCase):
         )
         self.start()
 
+    def test_pub_psub(self):
+        def on_recv(msg):
+            self.assert_pubsub(msg, 'pmessage', 'foo.*', 'bar')
+
+        def on_subscription(msg):
+            self.assert_pubsub(msg, 'psubscribe', 'foo.*', 1)
+            self.client2.listen(on_recv)
+
+        self.client2.psubscribe('foo.*', on_subscription)
+        self.delayed(0.1, lambda:
+            self.client2.set('gtx', 'rd', self.expect(RequestError)))
+        self.delayed(0.3, lambda:
+            self.client.publish('foo.1', 'bar')
+        )
+        self.delayed(0.3, lambda:
+            self.client.publish('bar.1', 'zar',
+                lambda *args: self.delayed(0.4, self.finish))
+        )
+        self.start()
+
     def test_unsubscribe(self):
         global c
         c = 0
