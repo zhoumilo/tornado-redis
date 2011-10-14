@@ -134,11 +134,10 @@ def format_pipeline_request(command_stack):
     return ''.join(format(c.cmd, *c.args, **c.kwargs) for c in command_stack)
 
 class Connection(object):
-    def __init__(self, host, port, on_connect, on_disconnect, timeout=None, io_loop=None):
+    def __init__(self, host, port, event_handler, timeout=None, io_loop=None):
         self.host = host
         self.port = port
-        self.on_connect = on_connect
-        self.on_disconnect = on_disconnect
+        self._event_handler = weakref.proxy(event_handler)
         self.timeout = timeout
         self._stream = None
         self._io_loop = io_loop
@@ -147,25 +146,38 @@ class Connection(object):
         self.in_progress = False
         self.read_queue = []
 
+    def __del__(self):
+        self.disconnect()
+
     def connect(self):
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-            sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
-            sock.settimeout(self.timeout)
-            sock.connect((self.host, self.port))
-            self._stream = IOStream(sock, io_loop=self._io_loop)
-            self.connected()
-        except socket.error, e:
-            raise ConnectionError(str(e))
-        self.on_connect()
+        if not self._stream:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+                sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+                sock.settimeout(self.timeout)
+                sock.connect((self.host, self.port))
+                self._stream = IOStream(sock, io_loop=self._io_loop)
+                self.connected()
+            except socket.error, e:
+                raise ConnectionError(str(e))
+            self.fire_event('on_connect')
 
     def disconnect(self):
         if self._stream:
             try:
+                s = self._stream.socket
+                s.shutdown(socket.SHUT_RDWR)
                 self._stream.close()
-            except socket.error, e:
+            except socket.error:
                 pass
             self._stream = None
+
+    def fire_event(self, event):
+        if self._event_handler:
+            try:
+                getattr(self._event_handler, event)()
+            except AttributeError:
+                pass
 
     def write(self, data, try_left=None):
         if try_left is None:
@@ -191,7 +203,7 @@ class Connection(object):
                 raise ConnectionError('Tried to read from non-existent connection')
             self._stream.read_bytes(length, callback)
         except IOError:
-            self.on_disconnect()
+            self.fire_event('on_disconnect')
 
     def readline(self, callback):
         try:
@@ -200,7 +212,7 @@ class Connection(object):
                 raise ConnectionError('Tried to read from non-existent connection')
             self._stream.read_until('\r\n', callback)
         except IOError:
-            self.on_disconnect()
+            self.fire_event('on_disconnect')
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
@@ -293,22 +305,22 @@ PUB_SUB_COMMANDS = set([
 
 class _AsyncWrapper(object):
     def __init__(self, obj):
-        self.obj = obj
+        self.obj = weakref.proxy(obj)
         self.memoized = {}
 
     def __getattr__(self, item):
-        if item not in self.memoized:
-            self.memoized[item] = async(getattr(self.obj, item), cbname='callbacks')
-        return self.memoized[item]
+        #if item not in self.memoized:
+        #    self.memoized[item] = async(getattr(self.obj, item), cbname='callbacks')
+        #return self.memoized[item]
+        return async(getattr(self.obj, item), cbname='callbacks')
 
 
 class Client(object):
     def __init__(self, host='localhost', port=6379, password=None,
             selected_db=None, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
-        self.connection = Connection(host, port,
-            self.on_connect, self.on_disconnect, io_loop=self._io_loop)
-        self.async = _AsyncWrapper(weakref.proxy(self))
+        self.connection = Connection(host, port, self, io_loop=self._io_loop)
+        self.async = _AsyncWrapper(self)
         self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
@@ -349,6 +361,12 @@ class Client(object):
 
     def __repr__(self):
         return 'Brukva client (host=%s, port=%s)' % (self.connection.host, self.connection.port)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        pass
 
     def pipeline(self, transactional=False):
         if not self._pipeline:
@@ -416,6 +434,8 @@ class Client(object):
 
     @process
     def execute_command(self, cmd, callbacks, *args, **kwargs):
+        if not self.connection.connected():
+            self.connect()
         cmd_line = CmdLine(cmd, *args, **kwargs)
         with execution_context(callbacks) as ctx:
             if callbacks is None:
@@ -771,9 +791,6 @@ class Client(object):
         if with_scores:
             tokens.append('WITHSCORES')
         self.execute_command('ZCOUNT', callbacks, *tokens)
-
-    def zcard(self, key, callbacks=None):
-        self.execute_command('ZCARD', callbacks, key)
 
     def zscore(self, key, value, callbacks=None):
         self.execute_command('ZSCORE', callbacks, key, value)
