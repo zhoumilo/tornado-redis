@@ -1,9 +1,8 @@
-import brukva
+import tornadoredis
 import tornado.httpserver
 import tornado.web
-import tornado.websocket
 import tornado.ioloop
-from brukva import adisp
+import tornado.gen
 import logging
 
 
@@ -12,7 +11,7 @@ logging.basicConfig(level=logging.DEBUG)
 log = logging.getLogger('app')
 
 
-c = brukva.Client()
+c = tornadoredis.Client()
 c.connect()
 
 
@@ -27,11 +26,11 @@ c.set('zar', 'Lorem ipsum #3', on_set)
 
 class MainHandler(tornado.web.RequestHandler):
     @tornado.web.asynchronous
-    @adisp.process
+    @tornado.gen.engine
     def get(self):
-        foo = yield c.async.get('foo')
-        bar = yield c.async.get('bar')
-        zar = yield c.async.get('zar')
+        foo = yield tornado.gen.Task(c.get, 'foo')
+        bar = yield tornado.gen.Task(c.get, 'bar')
+        zar = yield tornado.gen.Task(c.get, 'zar')
         self.set_header('Content-Type', 'text/html')
         self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
 

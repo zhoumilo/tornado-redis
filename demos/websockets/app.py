@@ -6,14 +6,16 @@
 #  3. $ curl http://localhost:8888/msg -d 'message=Hello!'
 #     You should see 'Hello!' in your browser
 
-import brukva
 import tornado.httpserver
 import tornado.web
 import tornado.websocket
 import tornado.ioloop
+import tornado.gen
+
+import tornadoredis
 
 
-c = brukva.Client()
+c = tornadoredis.Client()
 c.connect()
 
 
@@ -33,17 +35,21 @@ class NewMessage(tornado.web.RequestHandler):
 class MessagesCatcher(tornado.websocket.WebSocketHandler):
     def __init__(self, *args, **kwargs):
         super(MessagesCatcher, self).__init__(*args, **kwargs)
-        self.client = brukva.Client()
+        self.listen()
+    
+    @tornado.gen.engine
+    def listen(self):
+        self.client = tornadoredis.Client()
         self.client.connect()
-        self.client.subscribe('test_channel')
-
-    def open(self):
+        yield tornado.gen.Task(self.client.subscribe, 'test_channel')
         self.client.listen(self.on_message)
 
-    def on_message(self, result):
-        self.write_message(str(result.body))
+    def on_message(self, msg):
+        if msg.kind == 'message':
+            self.write_message(str(msg.body))
 
     def close(self):
+        print 'closed'
         self.client.unsubscribe('test_channel')
         self.client.disconnect()
 

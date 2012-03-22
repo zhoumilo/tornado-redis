@@ -1,41 +1,44 @@
-brükva
-========
+Tornado-Redis
+=============
 
 Asynchronous [Redis](http://redis.io/) client that works within [Tornado](http://tornadoweb.org/) IO loop.
+
+This is basically a fork of [brükva](https://github.com/evilkost/brukva) redis client
+slightly modified to work with tornado.gen interface instead of adisp.
 
 Usage
 -----
 
-Input:
+	import tornadoredis
+	import tornado.web
+	import tornado.gen
 
-    import logging
-    logging.basicConfig()
-    import brukva
-    c = brukva.Client()
-    c.connect()
-    loop = c.connection._stream.io_loop
-    def on_result(result):
-        print result
-    c.set('foo', 'bar', on_result)
-    c.get('foo', on_result)
-    c.hgetall('foo', [on_result, lambda r: loop.stop()])
-    loop.start() # start tornado mainloop
+	...	
+	
+	c = tornadoredis.Client()
+	c.connect()
 
-Output:
+	...
 
-    True
-    bar
-    ERROR:brukva.client:ResponseError (on HGETALL [('foo',), {}]): Operation against a key holding the wrong kind of value
-    ResponseError (on HGETALL [('foo',), {}]): Operation against a key holding the wrong kind of value
+	class MainHandler(tornado.web.RequestHandler):
+	    @tornado.web.asynchronous
+	    @tornado.gen.engine
+	    def get(self):
+	        foo = yield tornado.gen.Task(c.get, 'foo')
+	        bar = yield tornado.gen.Task(c.get, 'bar')
+	        zar = yield tornado.gen.Task(c.get, 'zar')
+	        self.set_header('Content-Type', 'text/html')
+	        self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
 
 Tips on testing
 ---------------
 
-Run redis-server on localhost:6379 with option "timeout 1".
+Run redis-server on localhost:6379.
 Run tests with the following command:
 
-    ./run_nose.sh
+	python -m tornado.testing tornadoredis.tests
 
+Reconnect tests have been disabled by default.
 
 Credits
 -------
