@@ -15,5 +15,5 @@ setup(name='tornado-redis',
       license='WTFPL',
       url='http://github.com/leporo/tornado-redis',
       keywords=['Redis', 'Tornado'],
-      packages=['tornado-redis'],
+      packages=['tornadoredis'],
      )
