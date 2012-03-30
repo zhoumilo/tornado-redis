@@ -288,7 +288,8 @@ class Client(object):
                                     reply_int),
                 string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
                                     reply_int),
-                string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE',
+                string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE '
+                                    'ZREVRANGEBYSCORE',
                                     reply_zset),
                 {'HMGET': reply_hmget},
                 {'PING': make_reply_assert_msg('PONG')},
@@ -745,6 +746,16 @@ class Client(object):
         if with_scores:
             tokens.append('WITHSCORES')
         self.execute_command('ZRANGEBYSCORE', *tokens, callback=callback)
+
+    def zrevrangebyscore(self, key, end, start, offset=None, limit=None, with_scores=False, callback=None):
+        tokens = [key, end, start]
+        if offset is not None:
+            tokens.append('LIMIT')
+            tokens.append(offset)
+            tokens.append(limit)
+        if with_scores:
+            tokens.append('WITHSCORES')
+        self.execute_command('ZREVRANGEBYSCORE', *tokens, callback=callback)
 
     def zremrangebyrank(self, key, start, end, callback=None):
         self.execute_command('ZREMRANGEBYRANK', key, start, end, callback=callback)
