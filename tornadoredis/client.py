@@ -589,6 +589,12 @@ class Client(object):
             tokens.append(store)
         return self.execute_command('SORT', *tokens, callback=callback)
 
+    def getbit(self, key, offset, callback=None):
+        self.execute_command('GETBIT', key, offset, callback=callback)
+
+    def setbit(self, key, offset, value, callback=None):
+        self.execute_command('SETBIT', key, offset, value, callback=callback)
+
     ### COUNTERS COMMANDS
     def incr(self, key, callback=None):
         self.execute_command('INCR', key, callback=callback)
