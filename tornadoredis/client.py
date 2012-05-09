@@ -903,6 +903,25 @@ class Client(object):
     def unwatch(self, callback=None):
         self.execute_command('UNWATCH', callback=callback)
 
+    ### SCRIPTING COMMANDS
+    def eval(self, script, keys, args, callback=None):
+        self.execute_command('EVAL', script, len(keys), *keys, *args, callback=callback)
+
+    def evalsha(self, shahash, keys, args, callback=None):
+        self.execute_command('EVALSHA', shahash, len(keys), *keys, *args, callback=callback)
+
+    def script_exists(self, scripts, callback=None):
+        self.execute_command('SCRIPT EXISTS', *scripts, callback=callback)
+
+    def script_flush(self, callback=None):
+        self.execute_command('SCRIPT FLUSH', callback=callback)
+
+    def script_kill(self, callback=None):
+        self.execute_command('SCRIPT KILL', callback=callback)
+
+    def script_load(self, script, callback=None):
+        self.execute_command('SCRIPT LOAD', script, callback=callback)
+
 class Pipeline(Client):
     def __init__(self, transactional, *args, **kwargs):
         super(Pipeline, self).__init__(*args, **kwargs)
