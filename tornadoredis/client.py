@@ -905,13 +905,17 @@ class Client(object):
 
     ### SCRIPTING COMMANDS
     def eval(self, script, keys, args, callback=None):
-        self.execute_command('EVAL', script, len(keys), *keys, *args, callback=callback)
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVAL', script, num_keys, *keys, callback=callback)
 
     def evalsha(self, shahash, keys, args, callback=None):
-        self.execute_command('EVALSHA', shahash, len(keys), *keys, *args, callback=callback)
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVALSHA', shahash, num_keys, *keys, callback=callback)
 
-    def script_exists(self, scripts, callback=None):
-        self.execute_command('SCRIPT EXISTS', *scripts, callback=callback)
+    def script_exists(self, shahashes, callback=None):
+        self.execute_command('SCRIPT EXISTS', *shahashes, callback=callback)
 
     def script_flush(self, callback=None):
         self.execute_command('SCRIPT FLUSH', callback=callback)
