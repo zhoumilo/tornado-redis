@@ -113,8 +113,6 @@ class Connection(object):
           callback(None)
         self.read_callbacks = []
 
-
-
     def disconnect(self):
         if self._stream:
             s = self._stream
