@@ -8,6 +8,7 @@ import weakref
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
 from tornado import gen
+from tornado import stack_context
 
 from datetime import datetime
 from exceptions import RequestError, ConnectionError, ResponseError #, InvalidResponse
@@ -86,6 +87,7 @@ class Connection(object):
 
         self.in_progress = False
         self.read_queue = []
+        self.read_callbacks = []
 
     def __del__(self):
         self.disconnect()
@@ -98,10 +100,20 @@ class Connection(object):
                 sock.settimeout(self.timeout)
                 sock.connect((self.host, self.port))
                 self._stream = IOStream(sock, io_loop=self._io_loop)
+                self._stream.set_close_callback(self.on_stream_close)
                 self.connected()
             except socket.error, e:
                 raise ConnectionError(str(e))
             self.fire_event('on_connect')
+
+    def on_stream_close(self):
+      if self._stream:
+        self._stream = None
+        for callback in self.read_callbacks:
+          callback(None)
+        self.read_callbacks = []
+
+
 
     def disconnect(self):
         if self._stream:
@@ -146,12 +158,19 @@ class Connection(object):
         except IOError:
             self.fire_event('on_disconnect')
 
+    def readline_callback(self, callback, *args, **kwargs):
+      self.read_callbacks.remove(callback)
+      callback(*args, **kwargs)
+
     def readline(self, callback):
         try:
             if not self._stream:
                 self.disconnect()
                 raise ConnectionError('Tried to read from non-existent connection')
-            self._stream.read_until('\r\n', callback=callback)
+            saved_callback = stack_context.wrap(callback)
+            self.read_callbacks.append(saved_callback)
+            self._stream.read_until('\r\n',
+                callback=partial(self.readline_callback, saved_callback))
         except IOError:
             self.fire_event('on_disconnect')
 
@@ -398,11 +417,11 @@ class Client(object):
             if not data:
                 result = None
                 self.connection.read_done()
-                raise Exception('TODO: [no data from connection->readline')
+                raise ConnectionError('no data received')
             else:
                 response = yield gen.Task(self.process_data, data, cmd_line)
                 result = self.format_reply(cmd_line, response)
-    
+
                 self.connection.read_done()
         if callback:
             callback(result)
@@ -869,22 +888,22 @@ class Client(object):
                     return ConnectionError('Connection lost')
                 else:
                     return e
-    
+
             #callback = callback or (lambda x: x)
             #yield gen.Task(self.connection.queue_wait)
-    
+
             cmd_listen = CmdLine('LISTEN')
             while self.subscribed:
                 data = yield gen.Task(self.connection.readline)
                 if isinstance(data, Exception):
                     raise data
-    
+
                 response = yield gen.Task(self.process_data, data, cmd_listen)
                 if isinstance(response, Exception):
                     raise response
-    
+
                 result = self.format_reply(cmd_listen, response)
-    
+
                 callback(result)
                 if result.kind in ['unsubscribe', 'punsubscribe'] and result.body == 0:
                     self.on_unsubscribed()
