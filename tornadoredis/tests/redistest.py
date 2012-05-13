@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import traceback as tb
 import time
 
 from tornado.testing import AsyncTestCase

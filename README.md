@@ -1,10 +1,14 @@
 Tornado-Redis
 =============
 
-Asynchronous [Redis](http://redis.io/) client that works within [Tornado](http://tornadoweb.org/) IO loop.
+Asynchronous [Redis](http://redis.io/) client for the [Tornado Web Server](http://tornadoweb.org/).
 
-This is basically a fork of [brükva](https://github.com/evilkost/brukva) redis client
-slightly modified to work with tornado.gen interface instead of adisp.
+This is a fork of [brükva](https://github.com/evilkost/brukva) redis client
+modified to be used via Tornado's native 'tornado.gen' interface instead
+of 'adisp' call dispatcher.
+
+Tornado-Redis is licensed under the Apache Licence, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0.html).
 
 Usage
 -----
@@ -33,22 +37,31 @@ Usage
 Tips on testing
 ---------------
 
-Run redis-server on localhost:6379.
-Run tests with the following command:
+The redis server must be started on the default (:6379) port.
+
+Use this command to run the test suite:
 
 	python -m tornado.testing tornadoredis.tests
 
-Reconnect tests have been disabled by default.
+'Autoreconnect' feature tests have been disabled by default.
+To enable them open the tornadoredis/test/__init__.py file and
+remove the '#' character from the line looking like this:
+ 
+    # from reconnect import ReconnectTestCase
 
-Credits
--------
-brukva is developed and maintained by [Konstantin Merenkov](mailto:kmerenkov@gmail.com)
+Make sure you've configured redis-server to drop client connections by timeout
+before running reconnect tests.
 
- * Inspiration: [redis-py](http://github.com/andymccurdy/redis-py)
- * Third-party software: [adisp](https://code.launchpad.net/adisp)
+Credits and Contributors
+------------------------
+The brukva project has been started by [Konstantin Merenkov](mailto:kmerenkov@gmail.com)
+but seem to be not maintained any more. 
 
+[evilkost](https://github.com/evilkost)
 
-License
--------
-See LICENSE file.
-Long story short: WTFPL v2
+[mattd](https://github.com/mattd)
+
+[maeldur](https://github.com/maeldur)
+
+The Tornado-Redis project's source code and 'tornado-redis' PyPI package
+are maintained by [leporo](https://github.com/leporo)

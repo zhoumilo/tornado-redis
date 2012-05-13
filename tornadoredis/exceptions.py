@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+
 class RedisError(Exception):
     pass
 
@@ -16,11 +17,12 @@ class RequestError(RedisError):
 
     def __repr__(self):
         if self.cmd_line:
-            return 'RequestError (on %s [%s, %s]): %s' % (self.cmd_line.cmd, self.cmd_line.args, self.cmd_line.kwargs, self.message)
+            return 'RequestError (on %s [%s, %s]): %s' \
+                   % (self.cmd_line.cmd, self.cmd_line.args,
+                      self.cmd_line.kwargs, self.message)
         return 'RequestError: %s' % self.message
 
     __str__ = __repr__
-
 
 
 class ResponseError(RedisError):
@@ -30,7 +32,9 @@ class ResponseError(RedisError):
 
     def __repr__(self):
         if self.cmd_line:
-            return 'ResponseError (on %s [%s, %s]): %s' % (self.cmd_line.cmd, self.cmd_line.args, self.cmd_line.kwargs, self.message)
+            return 'ResponseError (on %s [%s, %s]): %s' \
+                   % (self.cmd_line.cmd, self.cmd_line.args,
+                      self.cmd_line.kwargs, self.message)
         return 'ResponseError: %s' % self.message
 
     __str__ = __repr__
