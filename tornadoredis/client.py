@@ -420,7 +420,12 @@ class Client(object):
         if (cmd in PUB_SUB_COMMANDS) or (self.subscribed and cmd == 'PUBLISH'):
             result = True
         else:
-            data = yield gen.Task(self.connection.readline)
+            data = None
+            try:
+                data = yield gen.Task(self.connection.readline)
+            except ConnectionError, _:
+                pass # If IOError is raised inside readline, data will be None
+
             if not data:
                 result = None
                 self.connection.read_done()
