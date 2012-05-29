@@ -13,21 +13,22 @@ class PipelineTestCase(RedisTestCase):
         pipe = self.client.pipeline()
         pipe.set('foo', '123')
         pipe.set('bar', '456')
-        pipe.mget( ('foo', 'bar') )
+        pipe.mget(('foo', 'bar'))
 
         res = yield gen.Task(pipe.execute)
-        self.assertEqual(res, [True , True, ['123', '456',]])
+        self.assertEqual(res, [True, True, ['123', '456', ]])
         self.stop()
+
     @async_test
     @gen.engine
     def test_pipe_multi(self):
         pipe = self.client.pipeline(transactional=True)
         pipe.set('foo', '123')
         pipe.set('bar', '456')
-        pipe.mget( ('foo', 'bar') )
+        pipe.mget(('foo', 'bar'))
 
         res = yield gen.Task(pipe.execute)
-        self.assertEqual(res, [True , True, ['123', '456',]])
+        self.assertEqual(res, [True, True, ['123', '456', ]])
         self.stop()
 
     @async_test
@@ -111,7 +112,7 @@ class PipelineTestCase(RedisTestCase):
         pipe = self.client.pipeline(transactional=True)
         pipe.get('bar')
         res = yield gen.Task(pipe.execute)
-        self.assertEqual(res, ['zar',])
+        self.assertEqual(res, ['zar', ])
         self.stop()
 
     @async_test
@@ -154,11 +155,11 @@ class PipelineTestCase(RedisTestCase):
         pipe.zadd('foo', 1, 'a')
         pipe.zadd('foo', 2, 'b')
         pipe.zscore('foo', 'a')
-        pipe.zscore('foo', 'b' )
-        pipe.zrank('foo', 'a', )
-        pipe.zrank('foo', 'b', )
+        pipe.zscore('foo', 'b')
+        pipe.zrank('foo', 'a',)
+        pipe.zrank('foo', 'b',)
 
-        pipe.zrange('foo', 0, -1, True )
+        pipe.zrange('foo', 0, -1, True)
         pipe.zrange('foo', 0, -1, False)
 
         res = yield gen.Task(pipe.execute)
@@ -179,11 +180,11 @@ class PipelineTestCase(RedisTestCase):
         pipe.zadd('foo', 1, 'a')
         pipe.zadd('foo', 2, 'b')
         pipe.zscore('foo', 'a')
-        pipe.zscore('foo', 'b' )
-        pipe.zrank('foo', 'a', )
-        pipe.zrank('foo', 'b', )
+        pipe.zscore('foo', 'b')
+        pipe.zrank('foo', 'a',)
+        pipe.zrank('foo', 'b',)
 
-        pipe.zrange('foo', 0, -1, True )
+        pipe.zrange('foo', 0, -1, True)
         pipe.zrange('foo', 0, -1, False)
 
         res = yield gen.Task(pipe.execute)

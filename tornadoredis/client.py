@@ -8,9 +8,10 @@ import weakref
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
 from tornado import gen
+from tornado import stack_context
 
 from datetime import datetime
-from exceptions import RequestError, ConnectionError, ResponseError #, InvalidResponse
+from exceptions import RequestError, ConnectionError, ResponseError
 
 
 log = logging.getLogger('tornadoredis.client')
@@ -40,7 +41,7 @@ class CmdLine(object):
         self.kwargs = kwargs
 
     def __repr__(self):
-        return self.cmd + '(' + str(self.args)  + ',' + str(self.kwargs) + ')'
+        return self.cmd + '(' + str(self.args) + ',' + str(self.kwargs) + ')'
 
 
 def string_keys_to_dict(key_string, callback):
@@ -71,11 +72,13 @@ def format_command(*tokens, **kwargs):
 
 
 def format_pipeline_request(command_stack):
-    return ''.join(format_command(c.cmd, *c.args, **c.kwargs) for c in command_stack)
+    return ''.join(format_command(c.cmd, *c.args, **c.kwargs) \
+                   for c in command_stack)
 
 
 class Connection(object):
-    def __init__(self, host, port, event_handler, stop_after=None, io_loop=None):
+    def __init__(self, host, port, event_handler,
+                 stop_after=None, io_loop=None):
         self.host = host
         self.port = port
         self._event_handler = weakref.proxy(event_handler)
@@ -86,6 +89,7 @@ class Connection(object):
 
         self.in_progress = False
         self.read_queue = []
+        self.read_callbacks = []
 
     def __del__(self):
         self.disconnect()
@@ -98,10 +102,18 @@ class Connection(object):
                 sock.settimeout(self.timeout)
                 sock.connect((self.host, self.port))
                 self._stream = IOStream(sock, io_loop=self._io_loop)
+                self._stream.set_close_callback(self.on_stream_close)
                 self.connected()
             except socket.error, e:
                 raise ConnectionError(str(e))
             self.fire_event('on_connect')
+
+    def on_stream_close(self):
+        if self._stream:
+            self._stream = None
+            for callback in self.read_callbacks:
+                callback(None)
+            self.read_callbacks = []
 
     def disconnect(self):
         if self._stream:
@@ -146,19 +158,26 @@ class Connection(object):
         except IOError:
             self.fire_event('on_disconnect')
 
+    def readline_callback(self, callback, *args, **kwargs):
+        self.read_callbacks.remove(callback)
+        callback(*args, **kwargs)
+
     def readline(self, callback):
         try:
             if not self._stream:
                 self.disconnect()
                 raise ConnectionError('Tried to read from non-existent connection')
-            self._stream.read_until('\r\n', callback=callback)
+            saved_callback = stack_context.wrap(callback)
+            self.read_callbacks.append(saved_callback)
+            self._stream.read_until('\r\n',
+                callback=partial(self.readline_callback, saved_callback))
         except IOError:
             self.fire_event('on_disconnect')
 
     def try_to_perform_read(self):
         if not self.in_progress and self.read_queue:
             self.in_progress = True
-            self._io_loop.add_callback(partial(self.read_queue.pop(0), None) )
+            self._io_loop.add_callback(partial(self.read_queue.pop(0), None))
 
     def queue_wait(self, callback=None):
         self.read_queue.append(callback)
@@ -213,7 +232,7 @@ def reply_pubsub_message(r, *args, **kwargs):
 
 
 def reply_zset(r, *args, **kwargs):
-    if (not r ) or (not 'WITHSCORES' in args):
+    if (not r) or (not 'WITHSCORES' in args):
         return r
     return zip(r[::2], map(float, r[1::2]))
 
@@ -224,6 +243,7 @@ def reply_hmget(r, key, *fields, **kwargs):
 
 def reply_info(response):
     info = {}
+
     def get_value(value):
         if ',' not in value:
             return value
@@ -269,11 +289,12 @@ class Client(object):
         self.password = password
         self.selected_db = selected_db
         self.REPLY_MAP = dict_merge(
-                string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS EXPIRE HDEL HEXISTS '
+                string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS '
+                                    'EXPIRE HDEL HEXISTS '
                                     'HMSET MOVE MSET MSETNX SAVE SETNX',
                                     reply_to_bool),
-                string_keys_to_dict('FLUSHALL FLUSHDB SELECT SET SETEX SHUTDOWN '
-                                    'RENAME RENAMENX WATCH UNWATCH',
+                string_keys_to_dict('FLUSHALL FLUSHDB SELECT SET SETEX '
+                                    'SHUTDOWN RENAME RENAMENX WATCH UNWATCH',
                                     make_reply_assert_msg('OK')),
                 string_keys_to_dict('SMEMBERS SINTER SUNION SDIFF',
                                     reply_set),
@@ -293,8 +314,8 @@ class Client(object):
                                     reply_zset),
                 {'HMGET': reply_hmget},
                 {'PING': make_reply_assert_msg('PONG')},
-                {'LASTSAVE': reply_datetime },
-                {'TTL': reply_ttl } ,
+                {'LASTSAVE': reply_datetime},
+                {'TTL': reply_ttl},
                 {'INFO': reply_info},
                 {'MULTI_PART': make_reply_assert_msg('QUEUED')},
             )
@@ -302,7 +323,8 @@ class Client(object):
         self._pipeline = None
 
     def __repr__(self):
-        return 'Tornadoredis client (host=%s, port=%s)' % (self.connection.host, self.connection.port)
+        return 'Tornadoredis client (host=%s, port=%s)' \
+                % (self.connection.host, self.connection.port)
 
     def __enter__(self):
         return self
@@ -314,7 +336,7 @@ class Client(object):
         if not self._pipeline:
             self._pipeline = Pipeline(
                 selected_db=self.selected_db,
-                io_loop = self._io_loop,
+                io_loop=self._io_loop,
                 transactional=transactional
             )
             self._pipeline.connection = self.connection
@@ -360,11 +382,13 @@ class Client(object):
         if cmd_line.cmd not in self.REPLY_MAP:
             return data
         try:
-            res =  self.REPLY_MAP[cmd_line.cmd](data, *cmd_line.args, **cmd_line.kwargs)
+            res = self.REPLY_MAP[cmd_line.cmd](data,
+                                               *cmd_line.args,
+                                               **cmd_line.kwargs)
         except Exception, e:
             raise ResponseError(
-                'failed to format reply to %s, raw data: %s; err message: %s' %
-                (cmd_line, data, e), cmd_line
+                'failed to format reply to %s, raw data: %s; err message: %s'
+                % (cmd_line, data, e), cmd_line
             )
         return res
     ####
@@ -380,7 +404,9 @@ class Client(object):
         del kwargs['callback']
         cmd_line = CmdLine(cmd, *args, **kwargs)
         if self.subscribed and cmd not in PUB_SUB_COMMANDS:
-            callback(RequestError('Calling not pub/sub command during subscribed state', cmd_line))
+            callback(RequestError(
+                'Calling not pub/sub command during subscribed state',
+                cmd_line))
             return
 
         try:
@@ -394,25 +420,30 @@ class Client(object):
         if (cmd in PUB_SUB_COMMANDS) or (self.subscribed and cmd == 'PUBLISH'):
             result = True
         else:
-            data = yield gen.Task(self.connection.readline)
+            data = None
+            try:
+                data = yield gen.Task(self.connection.readline)
+            except ConnectionError, _:
+                pass # If IOError is raised inside readline, data will be None
+
             if not data:
                 result = None
                 self.connection.read_done()
-                raise Exception('TODO: [no data from connection->readline')
+                raise ConnectionError('no data received')
             else:
                 response = yield gen.Task(self.process_data, data, cmd_line)
                 result = self.format_reply(cmd_line, response)
-    
+
                 self.connection.read_done()
         if callback:
             callback(result)
 
     @gen.engine
     def process_data(self, data, cmd_line, callback=None):
-        data = data[:-2] # strip \r\n
+        data = data[:-2]  # strip \r\n
 
         if data == '$-1':
-            response =  None
+            response = None
         elif data == '*0' or data == '*-1':
             response = []
         else:
@@ -421,9 +452,11 @@ class Client(object):
             head, tail = data[0], data[1:]
 
             if head == '*':
-                response = yield gen.Task(self.consume_multibulk, int(tail), cmd_line)
+                response = yield gen.Task(self.consume_multibulk,
+                                          int(tail),
+                                          cmd_line)
             elif head == '$':
-                response = yield gen.Task(self.consume_bulk, int(tail)+2)
+                response = yield gen.Task(self.consume_bulk, int(tail) + 2)
             elif head == '+':
                 response = tail
             elif head == ':':
@@ -433,7 +466,8 @@ class Client(object):
                     tail = tail[4:]
                 response = ResponseError(tail, cmd_line)
             else:
-                raise ResponseError('Unknown response type %s' % head, cmd_line)
+                raise ResponseError('Unknown response type %s' % head,
+                                    cmd_line)
         callback(response)
 
     @gen.engine
@@ -443,11 +477,11 @@ class Client(object):
             data = yield gen.Task(self.connection.readline)
             if not data:
                 raise ResponseError(
-                    'Not enough data in response to %s, accumulated tokens: %s'%
-                    (cmd_line, tokens), cmd_line
-                )
-            token = yield gen.Task(self.process_data, data, cmd_line) #FIXME error
-            tokens.append( token )
+                    'Not enough data in response to %s, accumulated tokens: %s'
+                    % (cmd_line, tokens),
+                    cmd_line)
+            token = yield gen.Task(self.process_data, data, cmd_line)
+            tokens.append(token)
 
         callback(tokens)
 
@@ -545,12 +579,12 @@ class Client(object):
 
     def mset(self, mapping, callback=None):
         items = []
-        [ items.extend(pair) for pair in mapping.iteritems() ]
+        [items.extend(pair) for pair in mapping.iteritems()]
         self.execute_command('MSET', *items, callback=callback)
 
     def msetnx(self, mapping, callback=None):
         items = []
-        [ items.extend(pair) for pair in mapping.iteritems() ]
+        [items.extend(pair) for pair in mapping.iteritems()]
         self.execute_command('MSETNX', *items, callback=callback)
 
     def get(self, key, callback=None):
@@ -565,8 +599,10 @@ class Client(object):
     def exists(self, key, callback=None):
         self.execute_command('EXISTS', key, callback=callback)
 
-    def sort(self, key, start=None, num=None, by=None, get=None, desc=False, alpha=False, store=None, callback=None):
-        if (start is not None and num is None) or (num is not None and start is None):
+    def sort(self, key, start=None, num=None, by=None, get=None, desc=False,
+             alpha=False, store=None, callback=None):
+        if (start is not None and num is None) \
+        or (num is not None and start is None):
             raise ValueError("``start`` and ``num`` must both be specified")
 
         tokens = [key]
@@ -718,7 +754,8 @@ class Client(object):
     def zrem(self, key, value, callback=None):
         self.execute_command('ZREM', key, value, callback=callback)
 
-    def zcount(self, key, start, end, offset=None, limit=None, with_scores=None, callback=None):
+    def zcount(self, key, start, end, offset=None, limit=None,
+               with_scores=None, callback=None):
         tokens = [key, start, end]
         if offset is not None:
             tokens.append('LIMIT')
@@ -743,7 +780,8 @@ class Client(object):
             tokens.append('WITHSCORES')
         self.execute_command('ZREVRANGE', *tokens, callback=callback)
 
-    def zrangebyscore(self, key, start, end, offset=None, limit=None, with_scores=False, callback=None):
+    def zrangebyscore(self, key, start, end, offset=None, limit=None,
+                      with_scores=False, callback=None):
         tokens = [key, start, end]
         if offset is not None:
             tokens.append('LIMIT')
@@ -753,7 +791,8 @@ class Client(object):
             tokens.append('WITHSCORES')
         self.execute_command('ZRANGEBYSCORE', *tokens, callback=callback)
 
-    def zrevrangebyscore(self, key, end, start, offset=None, limit=None, with_scores=False, callback=None):
+    def zrevrangebyscore(self, key, end, start, offset=None, limit=None,
+                         with_scores=False, callback=None):
         tokens = [key, end, start]
         if offset is not None:
             tokens.append('LIMIT')
@@ -764,10 +803,12 @@ class Client(object):
         self.execute_command('ZREVRANGEBYSCORE', *tokens, callback=callback)
 
     def zremrangebyrank(self, key, start, end, callback=None):
-        self.execute_command('ZREMRANGEBYRANK', key, start, end, callback=callback)
+        self.execute_command('ZREMRANGEBYRANK', key, start, end,
+                             callback=callback)
 
     def zremrangebyscore(self, key, start, end, callback=None):
-        self.execute_command('ZREMRANGEBYSCORE', key, start, end, callback=callback)
+        self.execute_command('ZREMRANGEBYSCORE', key, start, end,
+                             callback=callback)
 
     def zinterstore(self, dest, keys, aggregate=None, callback=None):
         return self._zaggregate('ZINTERSTORE', dest, keys, aggregate, callback)
@@ -798,7 +839,7 @@ class Client(object):
 
     def hmset(self, key, mapping, callback=None):
         items = []
-        [ items.extend(pair) for pair in mapping.iteritems() ]
+        map(items.extend, mapping.iteritems())
         self.execute_command('HMSET', key, *items, callback=callback)
 
     def hset(self, key, field, value, callback=None):
@@ -840,9 +881,11 @@ class Client(object):
             channels = [channels]
         if not self.subscribed:
             original_callback = callback
+
             def _cb(*args, **kwargs):
                 self.on_subscribed(*args, **kwargs)
                 original_callback(*args, **kwargs)
+
             callback = _cb if original_callback else self.on_subscribed
         self.execute_command(cmd, *channels, callback=callback)
 
@@ -869,30 +912,27 @@ class Client(object):
     @gen.engine
     def listen(self, callback=None):
         if callback:
-            # 'LISTEN' is just for receiving information, it is not actually sent anywhere
             def error_wrapper(e):
                 if isinstance(e, GeneratorExit):
                     return ConnectionError('Connection lost')
                 else:
                     return e
-    
-            #callback = callback or (lambda x: x)
-            #yield gen.Task(self.connection.queue_wait)
-    
+
             cmd_listen = CmdLine('LISTEN')
             while self.subscribed:
                 data = yield gen.Task(self.connection.readline)
                 if isinstance(data, Exception):
                     raise data
-    
+
                 response = yield gen.Task(self.process_data, data, cmd_listen)
                 if isinstance(response, Exception):
                     raise response
-    
+
                 result = self.format_reply(cmd_listen, response)
-    
+
                 callback(result)
-                if result.kind in ['unsubscribe', 'punsubscribe'] and result.body == 0:
+                if result.kind in ['unsubscribe', 'punsubscribe'] \
+                and result.body == 0:
                     self.on_unsubscribed()
                     self.connection.read_done()
 
@@ -940,7 +980,8 @@ class Pipeline(Client):
                 'Client is not supposed to issue command %s in pipeline' % cmd)
         self.command_stack.append(CmdLine(cmd, *args, **kwargs))
 
-    def discard(self): # actually do nothing with redis-server, just flush command_stack
+    def discard(self):
+        # actually do nothing with redis-server, just flush the command_stack
         self.command_stack = []
 
     def format_replies(self, cmd_lines, responses):
@@ -958,7 +999,9 @@ class Pipeline(Client):
         self.command_stack = []
 
         if self.transactional:
-            command_stack = [CmdLine('MULTI')] + command_stack + [CmdLine('EXEC')]
+            command_stack = [CmdLine('MULTI')] \
+                          + command_stack \
+                          + [CmdLine('EXEC')]
 
         request = format_pipeline_request(command_stack)
 
@@ -985,21 +1028,21 @@ class Pipeline(Client):
             try:
                 cmd_line = cmds.next()
                 if self.transactional and cmd_line.cmd != 'EXEC':
-                    response = yield gen.Task(self.process_data, data, CmdLine('MULTI_PART'))
+                    response = yield gen.Task(self.process_data, data,
+                                              CmdLine('MULTI_PART'))
                 else:
-                    response = yield gen.Task(self.process_data, data, cmd_line)
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              cmd_line)
                 responses.append(response)
-            except Exception,e :
+            except Exception, e:
                 responses.append(e)
         self.connection.read_done()
 
         if self.transactional:
             command_stack = command_stack[:-1]
-            responses = responses[-1] # actual data only from EXEC command
-            #FIXME:  assert all other responses to be 'QUEUED'
-            #log.info('responses %s', responses)
+            responses = responses[-1]
             results = self.format_replies(command_stack[1:], responses)
-            #log.info('results %s', results)
         else:
             results = self.format_replies(command_stack, responses)
 

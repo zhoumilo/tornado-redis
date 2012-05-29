@@ -9,3 +9,5 @@ src/*.egg-info/*
 /.project
 /.pydevproject
 /.settings
+/build
+/dist
