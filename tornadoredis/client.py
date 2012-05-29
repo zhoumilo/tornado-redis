@@ -944,26 +944,38 @@ class Client(object):
         self.execute_command('UNWATCH', callback=callback)
 
     ### SCRIPTING COMMANDS
-    def eval(self, script, keys, args, callback=None):
+    def eval(self, script, keys=None, args=None, callback=None):
+        if keys is None:
+            keys = []
+        if args is None:
+            args = []
         num_keys = len(keys)
         keys.extend(args)
         self.execute_command('EVAL', script, num_keys, *keys, callback=callback)
 
-    def evalsha(self, shahash, keys, args, callback=None):
+    def evalsha(self, shahash, keys=None, args=None, callback=None):
+        if keys is None:
+            keys = []
+        if args is None:
+            args = []
         num_keys = len(keys)
         keys.extend(args)
         self.execute_command('EVALSHA', shahash, num_keys, *keys, callback=callback)
 
     def script_exists(self, shahashes, callback=None):
+        # not yet implemented in the redis protocol
         self.execute_command('SCRIPT EXISTS', *shahashes, callback=callback)
 
     def script_flush(self, callback=None):
-        self.execute_command('SCRIPT FLUSH', callback=callback)
+        # not yet implemented in the redis protocol
+        self.execute_command('SCRIPT FLUSH', callback=callback, verbose=True)
 
     def script_kill(self, callback=None):
+        # not yet implemented in the redis protocol
         self.execute_command('SCRIPT KILL', callback=callback)
 
     def script_load(self, script, callback=None):
+        # not yet implemented in the redis protocol
         self.execute_command('SCRIPT LOAD', script, callback=callback)
 
 class Pipeline(Client):
