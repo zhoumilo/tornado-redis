@@ -625,6 +625,12 @@ class Client(object):
             tokens.append(store)
         return self.execute_command('SORT', *tokens, callback=callback)
 
+    def getbit(self, key, offset, callback=None):
+        self.execute_command('GETBIT', key, offset, callback=callback)
+
+    def setbit(self, key, offset, value, callback=None):
+        self.execute_command('SETBIT', key, offset, value, callback=callback)
+
     ### COUNTERS COMMANDS
     def incr(self, key, callback=None):
         self.execute_command('INCR', key, callback=callback)
@@ -937,6 +943,40 @@ class Client(object):
     def unwatch(self, callback=None):
         self.execute_command('UNWATCH', callback=callback)
 
+    ### SCRIPTING COMMANDS
+    def eval(self, script, keys=None, args=None, callback=None):
+        if keys is None:
+            keys = []
+        if args is None:
+            args = []
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVAL', script, num_keys, *keys, callback=callback)
+
+    def evalsha(self, shahash, keys=None, args=None, callback=None):
+        if keys is None:
+            keys = []
+        if args is None:
+            args = []
+        num_keys = len(keys)
+        keys.extend(args)
+        self.execute_command('EVALSHA', shahash, num_keys, *keys, callback=callback)
+
+    def script_exists(self, shahashes, callback=None):
+        # not yet implemented in the redis protocol
+        self.execute_command('SCRIPT EXISTS', *shahashes, callback=callback)
+
+    def script_flush(self, callback=None):
+        # not yet implemented in the redis protocol
+        self.execute_command('SCRIPT FLUSH', callback=callback, verbose=True)
+
+    def script_kill(self, callback=None):
+        # not yet implemented in the redis protocol
+        self.execute_command('SCRIPT KILL', callback=callback)
+
+    def script_load(self, script, callback=None):
+        # not yet implemented in the redis protocol
+        self.execute_command('SCRIPT LOAD', script, callback=callback)
 
 class Pipeline(Client):
     def __init__(self, transactional, *args, **kwargs):
