@@ -662,3 +662,19 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.lrange, 'sorted', 0, -1)
         self.assertEqual(res, ['vodka', 'milk', 'gin', 'apple juice'])
         self.stop()
+
+    @async_test
+    @gen.engine
+    def test_bit_commands(self):
+        key = 'TEST_BIT'
+        res = yield gen.Task(self.client.setbit, key, 3, 1)
+        self.assertFalse(res)
+        res = yield gen.Task(self.client.getbit, key, 0)
+        self.assertFalse(res)
+        res = yield gen.Task(self.client.getbit, key, 3)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.setbit, key, 3, 0)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.getbit, key, 1)
+        self.assertFalse(res)
+        self.stop()
