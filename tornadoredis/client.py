@@ -565,8 +565,8 @@ class Client(object):
     def substr(self, key, start, end, callback=None):
         self.execute_command('SUBSTR', key, start, end, callback=callback)
 
-    def delete(self, key, callback=None):
-        self.execute_command('DEL', key, callback=callback)
+    def delete(self, *keys, **kwargs):
+        self.execute_command('DEL', *keys, callback=kwargs.get('callback'))
 
     def set(self, key, value, callback=None):
         self.execute_command('SET', key, value, callback=callback)
