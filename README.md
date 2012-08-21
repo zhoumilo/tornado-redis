@@ -77,8 +77,12 @@ The brukva project has been started by [Konstantin Merenkov](mailto:kmerenkov@gm
 but seem to be not maintained any more. 
 
 [evilkost](https://github.com/evilkost)
+
 [mattd](https://github.com/mattd)
+
 [maeldur](https://github.com/maeldur)
+
+[jbochi](https://github.com/jbochi)
 
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
 are maintained by [leporo](https://github.com/leporo).
