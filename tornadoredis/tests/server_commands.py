@@ -28,6 +28,21 @@ class ServerCommandsTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_delete(self):
+        res = yield gen.Task(self.client.mset, {'a': 1, 'b': 2, 'c': 3})
+        res = yield gen.Task(self.client.delete, 'a')
+        res = yield gen.Task(self.client.exists, 'a')
+        self.assertEqual(res, False)
+
+        res = yield gen.Task(self.client.delete, 'b', 'c')
+        res = yield gen.Task(self.client.exists, 'b')
+        self.assertEqual(res, False)
+        res = yield gen.Task(self.client.exists, 'c')
+        self.assertEqual(res, False)
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_setex(self):
         res = yield gen.Task(self.client.setex, 'foo', 5, 'bar')
         self.assertEqual(res, True)
