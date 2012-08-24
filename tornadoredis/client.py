@@ -29,7 +29,7 @@ class Message(object):
             (self.kind, self.channel, self.body) = args
             self.pattern = self.channel
         elif len(args) == 4:
-            (self.kind, self.channel, self.pattern, self.body) = args
+            (self.kind, self.pattern, self.channel, self.body) = args
         else:
             raise ValueError('Invalid number of arguments')
 
