@@ -62,30 +62,27 @@ Use this command to run the test suite:
 
 	python -m tornado.testing tornadoredis.tests
 
-'Autoreconnect' feature tests have been disabled by default.
-To enable them open the tornadoredis/test/__init__.py file and
-remove the '#' character from the line looking like this:
- 
-    # from reconnect import ReconnectTestCase
-
-Make sure you've configured redis-server to drop client connections by timeout
-before running reconnect tests.
 
 Credits and Contributors
 ------------------------
-The brukva project has been started by [Konstantin Merenkov](mailto:kmerenkov@gmail.com)
+The [brükva](https://github.com/evilkost/brukva) project has been started
+by [Konstantin Merenkov](https://github.com/kmerenkov)
 but seem to be not maintained any more. 
 
 [evilkost](https://github.com/evilkost)
 
-[mattd](https://github.com/mattd)
+[Matt Dawson](https://github.com/mattd)
 
 [maeldur](https://github.com/maeldur)
 
-[jbochi](https://github.com/jbochi)
+[Olivier Yiptong](https://https://github.com/oyiptong)
+
+[Juarez Bochi](https://github.com/jbochi)
+
+[Jakub Roztocil](https://github.com/jkbr)
 
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
-are maintained by [leporo](https://github.com/leporo).
+are maintained by [Vlad Glushchuk](https://github.com/leporo).
 
 Tornado is an open source version of the scalable, non-blocking web server
 and and tools that power FriendFeed. Documentation and downloads are

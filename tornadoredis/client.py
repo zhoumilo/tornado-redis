@@ -4,11 +4,11 @@ from functools import partial
 from itertools import izip
 import logging
 import weakref
+from collections import deque
 
 from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
 from tornado import gen
-from tornado import stack_context
 
 from datetime import datetime
 from exceptions import RequestError, ConnectionError, ResponseError
@@ -88,11 +88,33 @@ class Connection(object):
         self.try_left = 2
 
         self.in_progress = False
-        self.read_queue = []
         self.read_callbacks = []
+        self.ready_callbacks = deque()
 
     def __del__(self):
         self.disconnect()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args, **kwargs):
+        if self.ready_callbacks:
+            # Pop a SINGLE callback from the queue and execute it.
+            # The next one will be executed from the code
+            # invoked by the callback
+            callback = self.ready_callbacks.popleft()
+            callback()
+
+    def ready(self):
+        return not self.read_callbacks and not self.ready_callbacks
+
+    def wait_until_ready(self, callback=None):
+        if callback:
+            if not self.ready():
+                self.ready_callbacks.append(callback)
+            else:
+                callback()
+        return self
 
     def connect(self):
         if not self._stream:
@@ -111,9 +133,10 @@ class Connection(object):
     def on_stream_close(self):
         if self._stream:
             self._stream = None
-            for callback in self.read_callbacks:
-                callback(None)
+            callbacks = self.read_callbacks
             self.read_callbacks = []
+            for callback in callbacks:
+                callback(None)
 
     def disconnect(self):
         if self._stream:
@@ -138,7 +161,8 @@ class Connection(object):
         if not self._stream:
             self.connect()
             if not self._stream:
-                raise ConnectionError('Tried to write to non-existent connection')
+                raise ConnectionError('Tried to write to '
+                                      'non-existent connection')
 
         if try_left > 0:
             try:
@@ -149,11 +173,12 @@ class Connection(object):
         else:
             raise ConnectionError('Tried to write to non-existent connection')
 
-    def read(self, length, callback):
+    def read(self, length, callback=None):
         try:
             if not self._stream:
                 self.disconnect()
-                raise ConnectionError('Tried to read from non-existent connection')
+                raise ConnectionError('Tried to read from '
+                                      'non-existent connection')
             self._stream.read_bytes(length, callback)
         except IOError:
             self.fire_event('on_disconnect')
@@ -162,30 +187,17 @@ class Connection(object):
         self.read_callbacks.remove(callback)
         callback(*args, **kwargs)
 
-    def readline(self, callback):
+    def readline(self, callback=None):
         try:
             if not self._stream:
                 self.disconnect()
-                raise ConnectionError('Tried to read from non-existent connection')
-            saved_callback = stack_context.wrap(callback)
-            self.read_callbacks.append(saved_callback)
+                raise ConnectionError('Tried to read from '
+                                      'non-existent connection')
+            self.read_callbacks.append(callback)
             self._stream.read_until('\r\n',
-                callback=partial(self.readline_callback, saved_callback))
+                callback=partial(self.readline_callback, callback))
         except IOError:
             self.fire_event('on_disconnect')
-
-    def try_to_perform_read(self):
-        if not self.in_progress and self.read_queue:
-            self.in_progress = True
-            self._io_loop.add_callback(partial(self.read_queue.pop(0), None))
-
-    def queue_wait(self, callback=None):
-        self.read_queue.append(callback)
-        self.try_to_perform_read()
-
-    def read_done(self):
-        self.in_progress = False
-        self.try_to_perform_read()
 
     def connected(self):
         if self._stream:
@@ -283,7 +295,6 @@ class Client(object):
             selected_db=None, io_loop=None):
         self._io_loop = io_loop or IOLoop.instance()
         self.connection = Connection(host, port, self, io_loop=self._io_loop)
-        self.queue = []
         self.current_cmd_line = None
         self.subscribed = False
         self.password = password
@@ -409,32 +420,26 @@ class Client(object):
                 cmd_line))
             return
 
+        if not self.connection.ready() and not self.subscribed:
+            yield gen.Task(self.connection.wait_until_ready)
+
         try:
             self.connection.write(self.format_command(cmd, *args, **kwargs))
         except Exception, e:
             self.connection.disconnect()
             raise e
 
-        yield gen.Task(self.connection.queue_wait)
-
         if (cmd in PUB_SUB_COMMANDS) or (self.subscribed and cmd == 'PUBLISH'):
             result = True
         else:
-            data = None
-            try:
-                data = yield gen.Task(self.connection.readline)
-            except ConnectionError, _:
-                pass # If IOError is raised inside readline, data will be None
-
-            if not data:
+            with self.connection as c:
                 result = None
-                self.connection.read_done()
-                raise ConnectionError('no data received')
-            else:
-                response = yield gen.Task(self.process_data, data, cmd_line)
-                result = self.format_reply(cmd_line, response)
-
-                self.connection.read_done()
+                data = yield gen.Task(c.readline)
+                if not data:
+                    raise ConnectionError('no data received')
+                else:
+                    resp = yield gen.Task(self.process_data, data, cmd_line)
+                    result = self.format_reply(cmd_line, resp)
         if callback:
             callback(result)
 
@@ -456,7 +461,14 @@ class Client(object):
                                           int(tail),
                                           cmd_line)
             elif head == '$':
-                response = yield gen.Task(self.consume_bulk, int(tail) + 2)
+                # Consume bulk reply
+                response = yield gen.Task(self.connection.read, int(tail) + 2)
+                if isinstance(response, Exception):
+                    raise response
+                if not response:
+                    raise ResponseError('EmptyResponse')
+                else:
+                    response = response[:-2]
             elif head == '+':
                 response = tail
             elif head == ':':
@@ -484,17 +496,6 @@ class Client(object):
             tokens.append(token)
 
         callback(tokens)
-
-    @gen.engine
-    def consume_bulk(self, length, callback=None):
-        data = yield gen.Task(self.connection.read, length)
-        if isinstance(data, Exception):
-            raise data
-        if not data:
-            raise ResponseError('EmptyResponse')
-        else:
-            data = data[:-2]
-        callback(data)
 
     ### MAINTENANCE
     def bgrewriteaof(self, callback=None):
@@ -919,22 +920,24 @@ class Client(object):
                     return e
 
             cmd_listen = CmdLine('LISTEN')
-            while self.subscribed:
-                data = yield gen.Task(self.connection.readline)
-                if isinstance(data, Exception):
-                    raise data
+            with self.connection as c:
+                while self.subscribed:
+                    data = yield gen.Task(c.readline)
+                    if isinstance(data, Exception):
+                        raise data
 
-                response = yield gen.Task(self.process_data, data, cmd_listen)
-                if isinstance(response, Exception):
-                    raise response
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              cmd_listen)
+                    if isinstance(response, Exception):
+                        raise response
 
-                result = self.format_reply(cmd_listen, response)
+                    result = self.format_reply(cmd_listen, response)
 
-                callback(result)
-                if result.kind in ['unsubscribe', 'punsubscribe'] \
-                and result.body == 0:
-                    self.on_unsubscribed()
-                    self.connection.read_done()
+                    callback(result)
+                    if result.kind in ['unsubscribe', 'punsubscribe'] \
+                    and result.body == 0:
+                        self.on_unsubscribed()
 
     ### CAS
     def watch(self, key, callback=None):
@@ -978,6 +981,7 @@ class Client(object):
         # not yet implemented in the redis protocol
         self.execute_command('SCRIPT LOAD', script, callback=callback)
 
+
 class Pipeline(Client):
     def __init__(self, transactional, *args, **kwargs):
         super(Pipeline, self).__init__(*args, **kwargs)
@@ -1017,6 +1021,9 @@ class Pipeline(Client):
 
         request = format_pipeline_request(command_stack)
 
+        if not self.connection.ready():
+            yield gen.Task(self.connection.wait_until_ready)
+
         try:
             self.connection.write(request)
         except IOError:
@@ -1028,28 +1035,27 @@ class Pipeline(Client):
             self.connection.disconnect()
             raise e
 
-        yield gen.Task(self.connection.queue_wait)
         responses = []
         total = len(command_stack)
         cmds = iter(command_stack)
 
-        while len(responses) < total:
-            data = yield gen.Task(self.connection.readline)
-            if not data:
-                raise ResponseError('Not enough data after EXEC')
-            try:
-                cmd_line = cmds.next()
-                if self.transactional and cmd_line.cmd != 'EXEC':
-                    response = yield gen.Task(self.process_data, data,
-                                              CmdLine('MULTI_PART'))
-                else:
-                    response = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_line)
-                responses.append(response)
-            except Exception, e:
-                responses.append(e)
-        self.connection.read_done()
+        with self.connection:
+            while len(responses) < total:
+                data = yield gen.Task(self.connection.readline)
+                if not data:
+                    raise ResponseError('Not enough data after EXEC')
+                try:
+                    cmd_line = cmds.next()
+                    if self.transactional and cmd_line.cmd != 'EXEC':
+                        response = yield gen.Task(self.process_data, data,
+                                                  CmdLine('MULTI_PART'))
+                    else:
+                        response = yield gen.Task(self.process_data,
+                                                  data,
+                                                  cmd_line)
+                    responses.append(response)
+                except Exception, e:
+                    responses.append(e)
 
         if self.transactional:
             command_stack = command_stack[:-1]
