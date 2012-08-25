@@ -26,7 +26,7 @@ class PubSubTestCase(RedisTestCase):
         self._message_count += 1
         self.assertIn(msg.kind, self._expected_messages)
         expected = self._expected_messages[msg.kind]
-        self.assertEqual(msg.channel, expected[0])
+        self.assertEqual(msg.pattern, expected[0])
         self.assertEqual(msg.body, expected[1])
         if self._message_count >= self._expected_number:
             self.stop()
@@ -57,7 +57,7 @@ class PubSubTestCase(RedisTestCase):
                                'pmessage': ('foo.*', 'bar'),
                                'punsubscribe': ('foo.*', 0),
                                'unsubscribe': ('foo.*', 1)},
-                              3)
+                              2)
 
         yield gen.Task(self.client.psubscribe, 'foo.*')
         self.client.listen(self._handle_message)
@@ -67,5 +67,5 @@ class PubSubTestCase(RedisTestCase):
 
         self.wait()
 
-        self.assertEqual(self._message_count, 3)
+        self.assertEqual(self._message_count, 2)
         self.stop()
