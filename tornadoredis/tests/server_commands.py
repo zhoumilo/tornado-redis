@@ -693,3 +693,22 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.getbit, key, 1)
         self.assertFalse(res)
         self.stop()
+
+    @async_test
+    @gen.engine
+    def test_sync_command_calls(self):
+        # One NEVER should execute redis commands this way.
+        # Client methodth SHOULD be invoked via gen.Task
+        # or provided with callback argument.
+        # But it may happen (and certanely happens in setUp method of
+        # this test).
+        # So check if a call without callback doesn't brake things down.
+        self.client.set('foo', 'bar')
+        self.client.set('foo', 'bar3')
+        self.client.set('foo', 'bar2')
+        c = yield gen.Task(self.client.get, 'foo')
+        self.assertEqual(c, 'bar2')
+        self.client.set('foo', 'bar3')
+        c = yield gen.Task(self.client.get, 'foo')
+        self.assertEqual(c, 'bar3')
+        self.stop()
