@@ -179,11 +179,14 @@ class Connection(object):
                 self.disconnect()
                 raise ConnectionError('Tried to read from '
                                       'non-existent connection')
-            self._stream.read_bytes(length, callback)
+            self.read_callbacks.append(callback)
+            self._stream.read_bytes(length,
+                                    callback=partial(self.read_callback,
+                                                     callback))
         except IOError:
             self.fire_event('on_disconnect')
 
-    def readline_callback(self, callback, *args, **kwargs):
+    def read_callback(self, callback, *args, **kwargs):
         self.read_callbacks.remove(callback)
         callback(*args, **kwargs)
 
@@ -195,7 +198,8 @@ class Connection(object):
                                       'non-existent connection')
             self.read_callbacks.append(callback)
             self._stream.read_until('\r\n',
-                callback=partial(self.readline_callback, callback))
+                                    callback=partial(self.read_callback,
+                                                     callback))
         except IOError:
             self.fire_event('on_disconnect')
 
