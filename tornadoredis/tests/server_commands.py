@@ -697,12 +697,12 @@ class ServerCommandsTestCase(RedisTestCase):
     @async_test
     @gen.engine
     def test_sync_command_calls(self):
-        # One NEVER should execute redis commands this way.
-        # Client methodth SHOULD be invoked via gen.Task
-        # or provided with callback argument.
-        # But it may happen (and certanely happens in setUp method of
-        # this test).
-        # So check if a call without callback doesn't brake things down.
+        # In general, one shouldn't execute redis commands this way.
+        # Client methods SHOULD be invoked via gen.Task
+        # or provided with the callback argument.
+        # But it may happen in some cases, and definitely happens
+        # in setUp method of this test.
+        # So let's make sure a call without callback does not affect things.
         self.client.set('foo', 'bar')
         self.client.set('foo', 'bar3')
         self.client.set('foo', 'bar2')
