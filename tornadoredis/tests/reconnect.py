@@ -1,11 +1,8 @@
 import socket
-from functools import partial
 
 from tornado import gen
-from tornado.ioloop import IOLoop
 from tornado.netutil import TCPServer
 
-from redistest import RedisTestCase, async_test
 from tornado.testing import AsyncTestCase
 
 import tornadoredis

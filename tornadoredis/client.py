@@ -420,6 +420,9 @@ class Client(object):
                 cmd_line))
             return
 
+        if not self.connection.connected():
+            self.connection.connect()
+
         if not self.connection.ready() and not self.subscribed:
             yield gen.Task(self.connection.wait_until_ready)
 
