@@ -81,6 +81,8 @@ but seem to be not maintained any more.
 
 [Jakub Roztocil](https://github.com/jkbr)
 
+[nizox](https://github.com/nizox)
+
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
 are maintained by [Vlad Glushchuk](https://github.com/leporo).
 
