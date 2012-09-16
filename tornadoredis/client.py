@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
-import socket
-from functools import partial
 from itertools import izip
 import logging
-import weakref
-from collections import deque
 
 from tornado.ioloop import IOLoop
-from tornado.iostream import IOStream
 from tornado import gen
 
 from datetime import datetime
-from exceptions import RequestError, ConnectionError, ResponseError
+from .exceptions import RequestError, ConnectionError, ResponseError
+from .connection import Connection
 
 
 log = logging.getLogger('tornadoredis.client')
@@ -50,163 +46,9 @@ def string_keys_to_dict(key_string, callback):
 
 def dict_merge(*dicts):
     merged = {}
-    [merged.update(d) for d in dicts]
+    for d in dicts:
+        merged.update(d)
     return merged
-
-
-def encode(value):
-    if isinstance(value, str):
-        return value
-    elif isinstance(value, unicode):
-        return value.encode('utf-8')
-    # pray and hope
-    return str(value)
-
-
-def format_command(*tokens, **kwargs):
-    cmds = []
-    for t in tokens:
-        e_t = encode(t)
-        cmds.append('$%s\r\n%s\r\n' % (len(e_t), e_t))
-    return '*%s\r\n%s' % (len(tokens), ''.join(cmds))
-
-
-def format_pipeline_request(command_stack):
-    return ''.join(format_command(c.cmd, *c.args, **c.kwargs) \
-                   for c in command_stack)
-
-
-class Connection(object):
-    def __init__(self, host, port, event_handler,
-                 stop_after=None, io_loop=None):
-        self.host = host
-        self.port = port
-        self._event_handler = weakref.proxy(event_handler)
-        self.timeout = stop_after
-        self._stream = None
-        self._io_loop = io_loop
-        self.try_left = 2
-
-        self.in_progress = False
-        self.read_callbacks = []
-        self.ready_callbacks = deque()
-
-    def __del__(self):
-        self.disconnect()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        if self.ready_callbacks:
-            # Pop a SINGLE callback from the queue and execute it.
-            # The next one will be executed from the code
-            # invoked by the callback
-            callback = self.ready_callbacks.popleft()
-            callback()
-
-    def ready(self):
-        return not self.read_callbacks and not self.ready_callbacks
-
-    def wait_until_ready(self, callback=None):
-        if callback:
-            if not self.ready():
-                self.ready_callbacks.append(callback)
-            else:
-                callback()
-        return self
-
-    def connect(self):
-        if not self._stream:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
-                sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
-                sock.settimeout(self.timeout)
-                sock.connect((self.host, self.port))
-                self._stream = IOStream(sock, io_loop=self._io_loop)
-                self._stream.set_close_callback(self.on_stream_close)
-                self.connected()
-            except socket.error, e:
-                raise ConnectionError(str(e))
-            self.fire_event('on_connect')
-
-    def on_stream_close(self):
-        if self._stream:
-            self._stream = None
-            callbacks = self.read_callbacks
-            self.read_callbacks = []
-            for callback in callbacks:
-                callback(None)
-
-    def disconnect(self):
-        if self._stream:
-            s = self._stream
-            self._stream = None
-            try:
-                s.socket.shutdown(socket.SHUT_RDWR)
-                s.close()
-            except socket.error:
-                pass
-
-    def fire_event(self, event):
-        if self._event_handler:
-            try:
-                getattr(self._event_handler, event)()
-            except AttributeError:
-                pass
-
-    def write(self, data, try_left=None):
-        if try_left is None:
-            try_left = self.try_left
-        if not self._stream:
-            self.connect()
-            if not self._stream:
-                raise ConnectionError('Tried to write to '
-                                      'non-existent connection')
-
-        if try_left > 0:
-            try:
-                self._stream.write(data)
-            except IOError:
-                self.disconnect()
-                self.write(data, try_left - 1)
-        else:
-            raise ConnectionError('Tried to write to non-existent connection')
-
-    def read(self, length, callback=None):
-        try:
-            if not self._stream:
-                self.disconnect()
-                raise ConnectionError('Tried to read from '
-                                      'non-existent connection')
-            self.read_callbacks.append(callback)
-            self._stream.read_bytes(length,
-                                    callback=partial(self.read_callback,
-                                                     callback))
-        except IOError:
-            self.fire_event('on_disconnect')
-
-    def read_callback(self, callback, *args, **kwargs):
-        self.read_callbacks.remove(callback)
-        callback(*args, **kwargs)
-
-    def readline(self, callback=None):
-        try:
-            if not self._stream:
-                self.disconnect()
-                raise ConnectionError('Tried to read from '
-                                      'non-existent connection')
-            self.read_callbacks.append(callback)
-            self._stream.read_until('\r\n',
-                                    callback=partial(self.read_callback,
-                                                     callback))
-        except IOError:
-            self.fire_event('on_disconnect')
-
-    def connected(self):
-        if self._stream:
-            return True
-        return False
 
 
 def reply_to_bool(r, *args, **kwargs):
@@ -337,6 +179,9 @@ class Client(object):
 
         self._pipeline = None
 
+    def __del__(self):
+        self.disconnect()
+
     def __repr__(self):
         return 'Tornadoredis client (host=%s, port=%s)' \
                 % (self.connection.host, self.connection.port)
@@ -386,7 +231,7 @@ class Client(object):
         # pray and hope
         return str(value)
 
-    def format_command(self, *tokens):
+    def format_command(self, *tokens, **kwargs):
         cmds = []
         for t in tokens:
             e_t = self.encode(t)
@@ -424,29 +269,39 @@ class Client(object):
                 cmd_line))
             return
 
-        if not self.connection.connected():
-            self.connection.connect()
+        n_tries = 2
+        while n_tries > 0:
+            n_tries -= 1
+            if not self.connection.connected():
+                self.connection.connect()
 
-        if not self.connection.ready() and not self.subscribed:
-            yield gen.Task(self.connection.wait_until_ready)
+            if not self.connection.ready() and not self.subscribed:
+                yield gen.Task(self.connection.wait_until_ready)
 
-        try:
-            self.connection.write(self.format_command(cmd, *args, **kwargs))
-        except Exception, e:
-            self.connection.disconnect()
-            raise e
-
-        if (cmd in PUB_SUB_COMMANDS) or (self.subscribed and cmd == 'PUBLISH'):
-            result = True
-        else:
-            with self.connection as c:
-                result = None
-                data = yield gen.Task(c.readline)
-                if not data:
-                    raise ConnectionError('no data received')
+            try:
+                self.connection.write(self.format_command(cmd, *args, **kwargs))
+            except Exception, e:
+                self.connection.disconnect()
+                if not n_tries:
+                    raise e
                 else:
-                    resp = yield gen.Task(self.process_data, data, cmd_line)
-                    result = self.format_reply(cmd_line, resp)
+                    continue
+
+            if ((cmd in PUB_SUB_COMMANDS) or
+                (self.subscribed and cmd == 'PUBLISH')):
+                result = True
+                break
+            else:
+                with self.connection as c:
+                    result = None
+                    data = yield gen.Task(c.readline)
+                    if not data:
+                        if not n_tries:
+                            raise ConnectionError('no data received')
+                    else:
+                        resp = yield gen.Task(self.process_data, data, cmd_line)
+                        result = self.format_reply(cmd_line, resp)
+                        break
         if callback:
             callback(result)
 
@@ -459,8 +314,6 @@ class Client(object):
         elif data == '*0' or data == '*-1':
             response = []
         else:
-            if len(data) == 0:
-                raise IOError('Disconnected')
             head, tail = data[0], data[1:]
 
             if head == '*':
@@ -1016,6 +869,10 @@ class Pipeline(Client):
                 results.append(e)
         return results
 
+    def format_pipeline_request(self, command_stack):
+        return ''.join(self.format_command(c.cmd, *c.args, **c.kwargs)
+                       for c in command_stack)
+
     @gen.engine
     def execute(self, callback=None):
         command_stack = self.command_stack
@@ -1026,7 +883,7 @@ class Pipeline(Client):
                           + command_stack \
                           + [CmdLine('EXEC')]
 
-        request = format_pipeline_request(command_stack)
+        request = self.format_pipeline_request(command_stack)
 
         if not self.connection.ready():
             yield gen.Task(self.connection.wait_until_ready)
