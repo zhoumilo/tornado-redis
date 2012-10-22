@@ -138,9 +138,16 @@ PUB_SUB_COMMANDS = set([
 
 class Client(object):
     def __init__(self, host='localhost', port=6379, password=None,
-            selected_db=None, io_loop=None):
+                 selected_db=None, io_loop=None, connection_pool=None):
         self._io_loop = io_loop or IOLoop.instance()
-        self.connection = Connection(host, port, self, io_loop=self._io_loop)
+        self._connection_pool = connection_pool
+        if connection_pool:
+            connection = connection_pool.get_connection(event_handler=self)
+        else:
+            connection = Connection(host=host, port=port,
+                                    event_handler=self,
+                                    io_loop=self._io_loop)
+        self.connection = connection
         self.current_cmd_line = None
         self.subscribed = False
         self.password = password
@@ -183,7 +190,7 @@ class Client(object):
         self.disconnect()
 
     def __repr__(self):
-        return 'Tornadoredis client (host=%s, port=%s)' \
+        return 'tornadoredis.Client (host=%s, port=%s)' \
                 % (self.connection.host, self.connection.port)
 
     def __enter__(self):
@@ -202,14 +209,7 @@ class Client(object):
             self._pipeline.connection = self.connection
         return self._pipeline
 
-    #### connection
-
-    def connect(self):
-        self.connection.connect()
-
-    def disconnect(self):
-        self.connection.disconnect()
-
+    #### Connection event handlers
     def on_connect(self):
         if self.password:
             self.auth(self.password)
@@ -220,7 +220,16 @@ class Client(object):
         if self.subscribed:
             self.subscribed = False
         raise ConnectionError("Socket closed on remote end")
-    ####
+
+    #### connection
+    def connect(self):
+        self.connection.connect()
+
+    def disconnect(self):
+        if self._connection_pool:
+            self._connection_pool.release(self.connection)
+        else:
+            self.connection.disconnect()
 
     #### formatting
     def encode(self, value):
@@ -228,7 +237,6 @@ class Client(object):
             return value
         elif isinstance(value, unicode):
             return value.encode('utf-8')
-        # pray and hope
         return str(value)
 
     def format_command(self, *tokens, **kwargs):
@@ -278,8 +286,9 @@ class Client(object):
             if not self.connection.ready() and not self.subscribed:
                 yield gen.Task(self.connection.wait_until_ready)
 
+            command = self.format_command(cmd, *args, **kwargs)
             try:
-                self.connection.write(self.format_command(cmd, *args, **kwargs))
+                yield gen.Task(self.connection.write, command)
             except Exception, e:
                 self.connection.disconnect()
                 if not n_tries:

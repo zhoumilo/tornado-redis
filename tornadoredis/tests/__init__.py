@@ -1,10 +1,11 @@
 import unittest
 
-from server_commands import ServerCommandsTestCase
-from pubsub import PubSubTestCase
-from pipeline import PipelineTestCase
-from scripting import ScriptingTestCase
-from reconnect import DisconnectTestCase  # ReconnectTestCase
+from .server_commands import ServerCommandsTestCase
+from .pubsub import PubSubTestCase
+from .pipeline import PipelineTestCase
+from .scripting import ScriptingTestCase
+from .reconnect import DisconnectTestCase, ReconnectTestCase
+from .pool import ConnectionPoolTestCase
 
 
 def all_tests():
@@ -14,6 +15,7 @@ def all_tests():
                                      PipelineTestCase,
                                      ScriptingTestCase,
                                      DisconnectTestCase,
-                                     # ReconnectTestCase,
+                                     ReconnectTestCase,
+                                     ConnectionPoolTestCase,
                                      ))
     return suite

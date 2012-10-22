@@ -1,4 +1,5 @@
 import socket
+from functools import partial
 
 from tornado import gen
 from tornado.netutil import TCPServer
@@ -81,12 +82,14 @@ class DisconnectTestCase(AsyncTestCase):
             self.wait()
         self.assertRaises(ConnectionError, _disconnect_and_send_a_command)
 
-    @async_test
-    @gen.engine
     def test_reconnect(self):
-        yield gen.Task(self.client.set, 'foo', 'bar')
+        def _test_send():
+            self.client.set('foo', 'bar', callback=self.stop)
+            self.wait()
+
+        _test_send()
         self._server.disconnect()
-        yield gen.Task(self.client.set, 'foo', 'bar')
+        _test_send()
         self.stop()
 
 

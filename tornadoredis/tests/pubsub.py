@@ -42,10 +42,9 @@ class PubSubTestCase(RedisTestCase):
         yield gen.Task(self.client.subscribe, 'foo')
         self.client.listen(self._handle_message)
         yield gen.Task(self.publisher.publish, 'foo', 'bar')
+        yield gen.Task(self.client.unsubscribe, 'foo')
 
         self.wait()
-
-        yield gen.Task(self.client.unsubscribe, 'foo')
 
         self.assertEqual(self._message_count, 1)
         self.stop()
