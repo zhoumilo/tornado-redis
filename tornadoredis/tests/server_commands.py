@@ -115,7 +115,8 @@ class ServerCommandsTestCase(RedisTestCase):
     @async_test
     @gen.engine
     def test_save(self):
-        now = datetime.now().replace(microsecond=0)
+        # TODO: Replace it with the TIME command.
+        now = datetime.now().replace(microsecond=0, second=0, minute=0, hour=0)
         res = yield gen.Task(self.client.save)
         self.assertEqual(res, True)
         res = yield gen.Task(self.client.lastsave)
@@ -139,7 +140,7 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.set, 'foo_b', 2)
         self.assertEqual(res, True)
         res = yield gen.Task(self.client.keys, 'foo_*')
-        self.assertEqual(res, ['foo_a', 'foo_b'])
+        self.assertEqual(set(res), set(['foo_a', 'foo_b']))
         self.stop()
 
     @async_test

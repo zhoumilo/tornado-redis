@@ -21,7 +21,7 @@ c.connect()
 
 class MainHandler(tornado.web.RequestHandler):
     def get(self):
-        self.render("template.html", title="Websocket test")
+        self.render("template.html", title="PubSub + WebSocket Demo")
 
 
 class NewMessage(tornado.web.RequestHandler):
@@ -63,4 +63,5 @@ application = tornado.web.Application([
 if __name__ == '__main__':
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8888)
+    print 'Demo is runing at 0.0.0.0:8888\nQuit the demo with CONTROL-C'
     tornado.ioloop.IOLoop.instance().start()
