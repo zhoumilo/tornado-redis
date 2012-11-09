@@ -2,7 +2,6 @@ import socket
 from functools import partial
 import weakref
 from collections import deque
-from itertools import chain
 
 from tornado.iostream import IOStream
 
@@ -23,6 +22,7 @@ class Connection(object):
         self.read_callbacks = []
         self.ready_callbacks = deque()
         self._lock = 0
+        self.info = {}
 
     def __del__(self):
         self.disconnect()
@@ -46,9 +46,12 @@ class Connection(object):
             callback = self.ready_callbacks.popleft()
             callback()
 
-    def set_event_handler(self, event_handler):
+    def set_event_handler(self, event_handler, weak=False):
         if event_handler:
-            self._event_handler = weakref.proxy(event_handler)
+            if weak:
+                self._event_handler = event_handler
+            else:
+                self._event_handler = weakref.proxy(event_handler)
         else:
             self._event_handler = None
 
@@ -184,17 +187,24 @@ class ConnectionPool(object):
     def get_connection(self, event_handler=None):
         "Get a connection from the pool"
         try:
-            connection = self._available_connections.pop()
+            connection = self._available_connections.popleft()
         except IndexError:
             connection = self.make_connection()
         if connection:
             connection.set_event_handler(event_handler)
             self._in_use_connections.add(connection)
         elif self.wait_for_avaliable:
-            connection = ConnectionStub(event_handler=event_handler)
-            self._waiting_clients.append(connection)
+            connection = self.make_proxy(client=event_handler)
         else:
             raise ConnectionError("Too many connections")
+        return connection
+
+    def make_proxy(self, client=None, connected=True):
+        connection = ConnectionProxy(pool=self,
+                                     client=client,
+                                     connected=connected)
+        if connected:
+            self._waiting_clients.append(connection)
         return connection
 
     def make_connection(self):
@@ -206,70 +216,66 @@ class ConnectionPool(object):
 
     def release(self, connection):
         "Releases the connection back to the pool"
-        if isinstance(connection, ConnectionStub):
-            self._waiting_clients.remove(connection)
-            connection = connection.connection
-            if not connection:
-                return
+        if isinstance(connection, ConnectionProxy):
+            try:
+                self._waiting_clients.remove(connection)
+            except ValueError:
+                pass
+            return
         connection.set_event_handler(None)
         if self._waiting_clients:
-            waiting = self._waiting_clients.pop()
+            waiting = self._waiting_clients.popleft()
             waiting.assign_connection(connection)
         else:
-            if connection in self._in_use_connections:
+            try:
                 self._in_use_connections.remove(connection)
+            except (KeyError, ValueError):
+                pass
             self._available_connections.append(connection)
 
-    def disconnect(self):
-        "Disconnects all connections in the pool"
-        all_conns = chain(self._available_connections,
-                          self._in_use_connections)
-        for connection in all_conns:
-            connection.disconnect()
+    def reconnect(self, connection_proxy):
+        if self._available_connections:
+            connection = self._available_connections.popleft()
+            connection_proxy.assign_connection(connection)
+        else:
+            self._waiting_clients.append(connection_proxy)
 
 
-class ConnectionStub(object):
+class ConnectionProxy(object):
     '''
     A stub object to replace a client's connection until one is available.
     '''
-    def __init__(self, event_handler=None):
-        super(ConnectionStub)
-        self.connection = None
-        self.client = event_handler
+    def __init__(self, pool=None, client=None, connected=True):
+        self.client = weakref.proxy(client)
+        self.pool = weakref.proxy(pool)
         self.ready_callbacks = []
-
-    def __getattribute__(self, name):
-        try:
-            return super(ConnectionStub, self).__getattribute__(name)
-        except AttributeError:
-            return getattr(object.__getattribute__(self, "connection"), name)
+        self._connected = connected
 
     def connected(self):
-        if self.connection:
-            return self.connection.connected()
-        else:
-            return True
+        return self._connected
+
+    def connect(self):
+        # Add this proxy to the waiting_clients list
+        if not self._connected:
+            self.pool.reconnect(self)
+            self._connected = True
 
     def ready(self):
-        if self.connection:
-            return self.connection.ready()
-        else:
-            return False
+        return False
 
     def wait_until_ready(self, callback=None):
-        if not self.connection:
-            if callback:
-                self.ready_callbacks.append(callback)
-            return self
-        else:
-            return self.connection.wait_until_ready(callback=callback)
+        if callback:
+            self.ready_callbacks.append(callback)
+        return self
 
     def assign_connection(self, connection):
-        self.connection = connection
+        '''
+        Replace this pending connection with the real one.
+        '''
         if self.ready_callbacks:
             connection.ready_callbacks += self.ready_callbacks
             self.ready_callbacks = []
-            connection.set_event_handler(self.client)
-            self.client.connection = connection
-            self.client = None
-            connection.continue_pending()
+        connection.set_event_handler(self.client, weak=True)
+        self.client.connection = connection
+        self.pool.release(self)
+        connection.continue_pending()

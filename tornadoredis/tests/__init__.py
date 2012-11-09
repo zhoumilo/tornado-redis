@@ -1,5 +1,6 @@
 import unittest
 
+from .misc import MiscTestCase
 from .server_commands import ServerCommandsTestCase
 from .pubsub import PubSubTestCase
 from .pipeline import PipelineTestCase
@@ -16,5 +17,5 @@ def all_tests():
                                      ScriptingTestCase,
                                      DisconnectTestCase,
                                      ConnectionPoolTestCase,
-                                     ))
+                                     MiscTestCase, ))
     return suite

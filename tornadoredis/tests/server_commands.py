@@ -131,7 +131,7 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.set, 'b', 2)
         self.assertEqual(res, True)
         res = yield gen.Task(self.client.keys, '*')
-        self.assertEqual(res, ['a', 'b'])
+        self.assertEqual(set(res), set(['a', 'b']))
         res = yield gen.Task(self.client.keys, '')
         self.assertEqual(res, [])
 
@@ -346,6 +346,13 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, 1)
         res = yield gen.Task(self.client.brpop, ['foo', 'bar'], 1)
         self.assertEqual(res, {'bar': 'cd'})
+
+        self.client.brpop('foo', 1, callback=(yield gen.Callback("brpop")))
+        c2 = self._new_client()
+        yield gen.Task(c2.lpush, 'foo', 'zz')
+        res = yield gen.Wait("brpop")
+        self.assertEqual(res, {'foo': 'zz'})
+
         self.stop()
 
     @async_test
@@ -365,6 +372,30 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, 0)
         res = yield gen.Task(self.client.lrange, 'bar', 0, -1)
         self.assertEqual(res, ['ab', 'cd'])
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_blpop(self):
+        res = yield gen.Task(self.client.lpush, 'foo', 'ab')
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.lpush, 'bar', 'cd')
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.blpop, ['foo', 'bar'], 1)
+        self.assertEqual(res, {'foo': 'ab'})
+        res = yield gen.Task(self.client.llen, 'foo')
+        self.assertEqual(res, 0)
+        res = yield gen.Task(self.client.llen, 'bar')
+        self.assertEqual(res, 1)
+        res = yield gen.Task(self.client.blpop, ['foo', 'bar'], 1)
+        self.assertEqual(res, {'bar': 'cd'})
+
+        self.client.blpop('foo', 1, callback=(yield gen.Callback("blpop")))
+        c2 = self._new_client()
+        yield gen.Task(c2.rpush, 'foo', 'zz')
+        res = yield gen.Wait("blpop")
+        self.assertEqual(res, {'foo': 'zz'})
+
         self.stop()
 
     @async_test
@@ -710,4 +741,13 @@ class ServerCommandsTestCase(RedisTestCase):
         self.client.set('foo', 'bar3')
         c = yield gen.Task(self.client.get, 'foo')
         self.assertEqual(c, 'bar3')
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_info(self):
+        info = yield gen.Task(self.client.info)
+        self.assertTrue(info)
+        self.assertIn('redis_version', info)
+
         self.stop()

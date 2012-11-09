@@ -19,9 +19,8 @@ class ConnectionPoolTestCase(RedisTestCase):
         return tornadoredis.ConnectionPool(**connection_params)
 
     def _new_client(self, pool=None):
-        client = tornadoredis.Client(connection_pool=pool)
-        # client.connection.connect()
-        client.select(self.test_db)
+        client = tornadoredis.Client(connection_pool=pool,
+                                     selected_db=self.test_db)
         return client
 
     @gen.engine
@@ -29,14 +28,35 @@ class ConnectionPoolTestCase(RedisTestCase):
         c1 = self._new_client(pool)
         v1 = '%d' % randint(1, 1000)
         yield gen.Task(c1.set, key, v1)
-        c1.disconnect()
-        callback(v1)
+        yield gen.Task(c1.disconnect)
+        self.io_loop.add_callback(partial(callback, v1))
+
+    @async_test
+    @gen.engine
+    def test_disconnect_on_destroy(self):
+        '''
+        Find and test the way to destroy client instances in
+        tornado.gen-wrapped functions. Still had no luck with it.
+        '''
+        @gen.engine
+        def some_code(pool, callback=None):
+            c1 = self._new_client(pool)
+            yield gen.Task(c1.get, 'foo')
+            # FIXME: Find a way to destroy the client instance here.
+            yield gen.Task(c1.disconnect)
+            callback(True)
+
+        pool = self._new_pool(max_connections=1)
+        yield gen.Task(some_code, pool)
+        yield gen.Task(some_code, pool)
+        yield gen.Task(some_code, pool)
+
+        self.stop()
 
     def test_max_connections(self):
-        return
         pool = self._new_pool(max_connections=2)
-        self._new_client(pool=pool)
-        self._new_client(pool=pool)
+        c1 = self._new_client(pool=pool)
+        c2 = self._new_client(pool=pool)
         self.assertRaises(ConnectionError,
                           partial(self._new_client, pool=pool))
 
@@ -50,6 +70,36 @@ class ConnectionPoolTestCase(RedisTestCase):
         c3 = self._new_client(pool)
         vals_saved = yield gen.Task(c3.mget, keys)
         self.assertEqual(vals, vals_saved)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_reconnect(self):
+        pool = self._new_pool(max_connections=1, wait_for_available=True)
+        c = self._new_client(pool)
+        v1 = '%d' % randint(1, 1000)
+        v2 = '%d' % randint(1, 1000)
+        yield gen.Task(c.set, 'foo1', v1)
+        yield gen.Task(c.disconnect)
+        yield gen.Task(c.set, 'foo2', v2)
+        yield gen.Task(c.disconnect)
+        v1_saved, v2_saved = yield gen.Task(c.mget, ('foo1', 'foo2'))
+        yield gen.Task(c.disconnect)
+        self.assertEqual(v1, v1_saved)
+        self.assertEqual(v2, v2_saved)
+
+        # Do the same thing with anither client instance
+        c = self._new_client(pool)
+        v1 = '%d' % randint(1, 1000)
+        v2 = '%d' % randint(1, 1000)
+        yield gen.Task(c.set, 'foo1', v1)
+        yield gen.Task(c.disconnect)
+        yield gen.Task(c.set, 'foo2', v2)
+        yield gen.Task(c.disconnect)
+        v1_saved, v2_saved = yield gen.Task(c.mget, ('foo1', 'foo2'))
+        self.assertEqual(v1, v1_saved)
+        self.assertEqual(v2, v2_saved)
 
         self.stop()
 

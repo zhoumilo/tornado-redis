@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 from tornado import gen
 
 from redistest import RedisTestCase, async_test
@@ -231,9 +230,12 @@ class PipelineTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
-    def test_response_error(self):
-        res = yield gen.Task(self.client.set, 'foo', 'bar')
-        self.assertTrue(res)
-        res = yield gen.Task(self.client.llen, 'foo')
-        self.assertIsInstance(res, ResponseError)
+    def test_with(self):
+        with self.client.pipeline() as pipe:
+            pipe.set('foo', '123')
+            pipe.set('bar', '456')
+            pipe.mget(('foo', 'bar'))
+
+            res = yield gen.Task(pipe.execute)
+        self.assertEqual(res, [True, True, ['123', '456', ]])
         self.stop()

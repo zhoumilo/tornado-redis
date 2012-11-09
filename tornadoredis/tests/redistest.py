@@ -46,9 +46,9 @@ class RedisTestCase(AsyncTestCase):
         super(RedisTestCase, self).tearDown()
 
     def _new_client(self):
-        client = tornadoredis.Client(io_loop=self.io_loop, port=self.test_port)
-        # client.connection.connect()
-        client.select(self.test_db)
+        client = tornadoredis.Client(io_loop=self.io_loop,
+                                     port=self.test_port,
+                                     selected_db=self.test_db)
         return client
 
     def delayed(self, timeout, cb):

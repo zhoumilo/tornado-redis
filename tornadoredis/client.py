@@ -114,16 +114,25 @@ def reply_info(response):
                 sub_dict[k] = v
         return sub_dict
     for line in response.splitlines():
-        key, value = line.split(':')
-        try:
-            info[key] = int(value)
-        except ValueError:
-            info[key] = get_value(value)
+        line = line.strip()
+        if line and not line.startswith('#'):
+            key, value = line.split(':')
+            try:
+                info[key] = int(value)
+            except ValueError:
+                info[key] = get_value(value)
     return info
 
 
 def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
+
+
+def to_list(source):
+    if isinstance(source, basestring):
+        return [source]
+    else:
+        return list(source)
 
 
 PUB_SUB_COMMANDS = set([
@@ -187,11 +196,10 @@ class Client(object):
         self._pipeline = None
 
     def __del__(self):
-        self.disconnect()
+        self.disconnect(destroying=True)
 
     def __repr__(self):
-        return 'tornadoredis.Client (host=%s, port=%s)' \
-                % (self.connection.host, self.connection.port)
+        return 'tornadoredis.Client (db=%s)' % (self.selected_db)
 
     def __enter__(self):
         return self
@@ -200,6 +208,27 @@ class Client(object):
         pass
 
     def pipeline(self, transactional=False):
+        '''
+        Create the 'Pipeline' to pack multiple redis commands
+        in a single request.
+
+        Usage:
+            pipe = self.client.pipeline()
+            pipe.delete('foo')
+            pipe.delete('bar')
+            pipe.delete('foo2')
+
+            yield gen.Task(pipe.execute)
+
+        or:
+
+            with self.client.pipeline() as pipe:
+                pipe.delete('foo')
+                pipe.delete('bar')
+                pipe.delete('foo2')
+
+                yield gen.Task(pipe.execute)
+        '''
         if not self._pipeline:
             self._pipeline = Pipeline(
                 selected_db=self.selected_db,
@@ -212,9 +241,15 @@ class Client(object):
     #### Connection event handlers
     def on_connect(self):
         if self.password:
-            self.auth(self.password)
+            password = self.connection.info.get('password', None)
+            if password != self.password:
+                self.auth(self.password)
+                self.connection.info['password'] = self.password
         if self.selected_db:
-            self.select(self.selected_db)
+            db = self.connection.info.get('db', None)
+            if db != self.selected_db:
+                self.select(self.selected_db)
+                self.connection.info['db'] = self.selected_db
 
     def on_disconnect(self):
         if self.subscribed:
@@ -223,13 +258,36 @@ class Client(object):
 
     #### connection
     def connect(self):
-        self.connection.connect()
+        if not self.connection.connected():
+            pool = self._connection_pool
+            if pool:
+                old_conn = self.connection
+                self.connection = pool.get_connection(event_handler=self)
+                self.connection.ready_callbacks = old_conn.ready_callbacks
+            else:
+                self.connection.connect()
 
-    def disconnect(self):
-        if self._connection_pool:
-            self._connection_pool.release(self.connection)
-        else:
-            self.connection.disconnect()
+    @gen.engine
+    def disconnect(self, destroying=False, callback=None):
+        '''
+        Disconnect from the Redis server.
+        Do not pass in the 'force' argument (it's for internal use only).
+        '''
+        try:
+            connection = self.connection
+        except AttributeError:
+            connection = None
+        if connection:
+            pool = self._connection_pool
+            if pool:
+                pool.release(connection)
+                yield gen.Task(connection.wait_until_ready)
+                self.connection = pool.make_proxy(client=self,
+                                                  connected=False)
+            else:
+                self.connection.disconnect()
+        if callback:
+            callback(False)
 
     #### formatting
     def encode(self, value):
@@ -286,22 +344,22 @@ class Client(object):
             if not self.connection.ready() and not self.subscribed:
                 yield gen.Task(self.connection.wait_until_ready)
 
-            command = self.format_command(cmd, *args, **kwargs)
-            try:
-                yield gen.Task(self.connection.write, command)
-            except Exception, e:
-                self.connection.disconnect()
-                if not n_tries:
-                    raise e
-                else:
-                    continue
+            with self.connection as c:
+                command = self.format_command(cmd, *args, **kwargs)
+                try:
+                    yield gen.Task(self.connection.write, command)
+                except Exception, e:
+                    self.connection.disconnect()
+                    if not n_tries:
+                        raise e
+                    else:
+                        continue
 
-            if ((cmd in PUB_SUB_COMMANDS) or
-                (self.subscribed and cmd == 'PUBLISH')):
-                result = True
-                break
-            else:
-                with self.connection as c:
+                if ((cmd in PUB_SUB_COMMANDS) or
+                    (self.subscribed and cmd == 'PUBLISH')):
+                    result = True
+                    break
+                else:
                     result = None
                     data = yield gen.Task(c.readline)
                     if not data:
@@ -516,12 +574,12 @@ class Client(object):
 
     ### LIST COMMANDS
     def blpop(self, keys, timeout=0, callback=None):
-        tokens = list(keys)
+        tokens = to_list(keys)
         tokens.append(timeout)
         self.execute_command('BLPOP', *tokens, callback=callback)
 
     def brpop(self, keys, timeout=0, callback=None):
-        tokens = list(keys)
+        tokens = to_list(keys)
         tokens.append(timeout)
         self.execute_command('BRPOP', *tokens, callback=callback)
 

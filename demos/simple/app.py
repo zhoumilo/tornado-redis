@@ -25,6 +25,7 @@ c.set('zar', 'Lorem ipsum #3', on_set)
 
 
 class MainHandler(tornado.web.RequestHandler):
+
     @tornado.web.asynchronous
     @tornado.gen.engine
     def get(self):
@@ -32,7 +33,8 @@ class MainHandler(tornado.web.RequestHandler):
         bar = yield tornado.gen.Task(c.get, 'bar')
         zar = yield tornado.gen.Task(c.get, 'zar')
         self.set_header('Content-Type', 'text/html')
-        self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
+        self.render("template.html", title="Simple demo",
+                    foo=foo, bar=bar, zar=zar)
 
 
 application = tornado.web.Application([
@@ -43,4 +45,5 @@ application = tornado.web.Application([
 if __name__ == '__main__':
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8888)
+    print 'Demo is runing at 0.0.0.0:8888\nQuit the demo with CONTROL-C'
     tornado.ioloop.IOLoop.instance().start()

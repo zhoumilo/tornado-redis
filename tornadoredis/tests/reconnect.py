@@ -58,9 +58,11 @@ class DisconnectTestCase(AsyncTestCase):
         self.client.flushdb()
 
     def _new_client(self):
-        client = tornadoredis.Client(io_loop=self.io_loop, port=self.test_port)
-        client.connection.connect()
-        client.select(self.test_db)
+        client = tornadoredis.Client(io_loop=self.io_loop,
+                                     port=self.test_port,
+                                     selected_db=self.test_db)
+        # client.connection.connect()
+        # client.select(self.test_db)
         return client
 
     def tearDown(self):
