@@ -9,12 +9,14 @@ from .exceptions import ConnectionError
 
 
 class Connection(object):
-    def __init__(self, host='localhost', port=6379, event_handler=None,
+    def __init__(self, host='localhost', port=6379, weak_event_handler=None,
                  stop_after=None, io_loop=None):
         self.host = host
         self.port = port
-        if event_handler:
-            self._event_handler = weakref.proxy(event_handler)
+        if weak_event_handler:
+            self._event_handler = weak_event_handler
+        else:
+            self._event_handler = None
         self.timeout = stop_after
         self._stream = None
         self._io_loop = io_loop

@@ -91,27 +91,29 @@ class ConnectionPoolTestCase(RedisTestCase):
 
         self.stop()
 
-#    @async_test
-#    @gen.engine
-#    def test_for_memory_leaks(self):
-#        '''
-#        Find and test the way to destroy client instances in
-#        tornado.gen-wrapped functions if the connection_pool is used.
-#        Still had no luck with it.
-#        '''
-#        @gen.engine
-#        def some_code(pool, on_client_destroy=None, callback=None):
-#            c1 = self._new_client(pool=pool,on_destroy=on_client_destroy)
-#            yield gen.Task(c1.get, 'foo')
-#            # FIXME: Find a way to destroy the client instance here.
-#            # yield gen.Task(c1.disconnect)
-#            callback(True)
-#
-#        pool = self._new_pool(max_connections=1)
-#
-#        for __ in xrange(1, 3):
-#            yield gen.Task(some_code, pool,
-#                           on_client_destroy=(yield gen.Callback('destroy')))
-#            yield gen.Wait('destroy')
-#
-#        self.stop()
+    @async_test
+    @gen.engine
+    def test_for_memory_leaks(self):
+        '''
+        Find and test the way to destroy client instances in
+        tornado.gen-wrapped functions if the connection_pool is used.
+        Still had no luck with it.
+        '''
+        @gen.engine
+        def some_code(pool, on_client_destroy=None, callback=None):
+            c = self._new_client(pool=pool,on_destroy=on_client_destroy)
+            n = '%d' % randint(1, 1000)
+            yield gen.Task(c.set, 'foo', n)
+            n2 = yield gen.Task(c.get, 'foo')
+            self.assertEqual(n, n2)
+
+            callback(True)
+
+        pool = self._new_pool(max_connections=1)
+
+        for __ in xrange(1, 3):
+            yield gen.Task(some_code, pool,
+                           on_client_destroy=(yield gen.Callback('destroy')))
+            yield gen.Wait('destroy')
+
+        self.stop()

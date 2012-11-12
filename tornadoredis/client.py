@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from functools import partial
 from itertools import izip
 import logging
 import weakref
@@ -146,55 +147,59 @@ PUB_SUB_COMMANDS = set([
 ])
 
 
+REPLY_MAP = dict_merge(
+    string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS '
+                        'EXPIRE HDEL HEXISTS '
+                        'HMSET MOVE MSET MSETNX SAVE SETNX',
+                        reply_to_bool),
+    string_keys_to_dict('FLUSHALL FLUSHDB SELECT SET SETEX '
+                        'SHUTDOWN RENAME RENAMENX WATCH UNWATCH',
+                        make_reply_assert_msg('OK')),
+    string_keys_to_dict('SMEMBERS SINTER SUNION SDIFF',
+                        reply_set),
+    string_keys_to_dict('HGETALL BRPOP BLPOP',
+                        reply_dict_from_pairs),
+    string_keys_to_dict('HGET',
+                        reply_str),
+    string_keys_to_dict('SUBSCRIBE UNSUBSCRIBE LISTEN '
+                        'PSUBSCRIBE UNSUBSCRIBE',
+                        reply_pubsub_message),
+    string_keys_to_dict('ZRANK ZREVRANK',
+                        reply_int),
+    string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
+                        reply_int),
+    string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE '
+                        'ZREVRANGEBYSCORE',
+                        reply_zset),
+    {'HMGET': reply_hmget},
+    {'PING': make_reply_assert_msg('PONG')},
+    {'LASTSAVE': reply_datetime},
+    {'TTL': reply_ttl},
+    {'INFO': reply_info},
+    {'MULTI_PART': make_reply_assert_msg('QUEUED')},
+)
+
+
 class Client(object):
+#    __slots__ = ('_io_loop', '_connection_pool', 'connection', 'subscribed',
+#                 'password', 'selected_db', '_pipeline', '_weak')
+
     def __init__(self, host='localhost', port=6379, password=None,
                  selected_db=None, io_loop=None, connection_pool=None):
         self._io_loop = io_loop or IOLoop.instance()
         self._connection_pool = connection_pool
+        self._weak = weakref.proxy(self)
         if connection_pool:
             connection = (connection_pool
-                          .get_connection(event_handler_proxy=weakref.proxy(self)))
+                          .get_connection(event_handler_proxy=self._weak))
         else:
             connection = Connection(host=host, port=port,
-                                    event_handler=self,
+                                    weak_event_handler=self._weak,
                                     io_loop=self._io_loop)
         self.connection = connection
-        self.current_cmd_line = None
         self.subscribed = False
         self.password = password
         self.selected_db = selected_db
-        self.REPLY_MAP = dict_merge(
-                string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS '
-                                    'EXPIRE HDEL HEXISTS '
-                                    'HMSET MOVE MSET MSETNX SAVE SETNX',
-                                    reply_to_bool),
-                string_keys_to_dict('FLUSHALL FLUSHDB SELECT SET SETEX '
-                                    'SHUTDOWN RENAME RENAMENX WATCH UNWATCH',
-                                    make_reply_assert_msg('OK')),
-                string_keys_to_dict('SMEMBERS SINTER SUNION SDIFF',
-                                    reply_set),
-                string_keys_to_dict('HGETALL BRPOP BLPOP',
-                                    reply_dict_from_pairs),
-                string_keys_to_dict('HGET',
-                                    reply_str),
-                string_keys_to_dict('SUBSCRIBE UNSUBSCRIBE LISTEN '
-                                    'PSUBSCRIBE UNSUBSCRIBE',
-                                    reply_pubsub_message),
-                string_keys_to_dict('ZRANK ZREVRANK',
-                                    reply_int),
-                string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
-                                    reply_int),
-                string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE '
-                                    'ZREVRANGEBYSCORE',
-                                    reply_zset),
-                {'HMGET': reply_hmget},
-                {'PING': make_reply_assert_msg('PONG')},
-                {'LASTSAVE': reply_datetime},
-                {'TTL': reply_ttl},
-                {'INFO': reply_info},
-                {'MULTI_PART': make_reply_assert_msg('QUEUED')},
-            )
-
         self._pipeline = None
 
     def __del__(self):
@@ -204,8 +209,12 @@ class Client(object):
         except AttributeError:
             connection = None
             pool = None
-        if connection and pool:
-            pool.release(connection)
+        if connection:
+            if pool:
+                pool.release(connection)
+                connection.wait_until_ready()
+            else:
+                connection.disconnect()
 
     def __repr__(self):
         return 'tornadoredis.Client (db=%s)' % (self.selected_db)
@@ -215,6 +224,24 @@ class Client(object):
 
     def __exit__(self, *args, **kwargs):
         pass
+
+    def __getattribute__(self, item):
+        '''
+        Bind methods to the weak proxy to avoid memory leaks
+        when bound method is passed as argument to the gen.Task
+        constructor.
+        '''
+        a = super(Client, self).__getattribute__(item)
+        try:
+            if callable(a) and a.__self__:
+                try:
+                    a = self.__class__.__dict__[item]
+                except KeyError:
+                    a = Client.__dict__[item]
+                a = partial(a, self._weak)
+        except AttributeError:
+            pass
+        return a
 
     def pipeline(self, transactional=False):
         '''
@@ -285,7 +312,7 @@ class Client(object):
             if pool:
                 pool.release(connection)
                 yield gen.Task(connection.wait_until_ready)
-                proxy = pool.make_proxy(client_proxy=weakref.proxy(self),
+                proxy = pool.make_proxy(client_proxy=self._weak,
                                         connected=False)
                 self.connection = proxy
             else:
@@ -309,12 +336,12 @@ class Client(object):
         return '*%s\r\n%s' % (len(tokens), ''.join(cmds))
 
     def format_reply(self, cmd_line, data):
-        if cmd_line.cmd not in self.REPLY_MAP:
+        if cmd_line.cmd not in REPLY_MAP:
             return data
         try:
-            res = self.REPLY_MAP[cmd_line.cmd](data,
-                                               *cmd_line.args,
-                                               **cmd_line.kwargs)
+            res = REPLY_MAP[cmd_line.cmd](data,
+                                          *cmd_line.args,
+                                          **cmd_line.kwargs)
         except Exception, e:
             raise ResponseError(
                 'failed to format reply to %s, raw data: %s; err message: %s'
@@ -322,11 +349,6 @@ class Client(object):
             )
         return res
     ####
-
-    #### new AsIO
-    def call_callback(self, callback, *args, **kwargs):
-        for cb in callback:
-            cb(*args, **kwargs)
 
     @gen.engine
     def execute_command(self, cmd, *args, **kwargs):
@@ -370,9 +392,12 @@ class Client(object):
                         if not n_tries:
                             raise ConnectionError('no data received')
                     else:
-                        resp = yield gen.Task(self.process_data, data, cmd_line)
+                        resp = yield gen.Task(self.process_data,
+                                              data,
+                                              cmd_line)
                         result = self.format_reply(cmd_line, resp)
                         break
+
         if callback:
             callback(result)
 
@@ -914,6 +939,7 @@ class Client(object):
 
 
 class Pipeline(Client):
+
     def __init__(self, transactional, *args, **kwargs):
         super(Pipeline, self).__init__(*args, **kwargs)
         self.transactional = transactional
@@ -982,7 +1008,8 @@ class Pipeline(Client):
                 try:
                     cmd_line = cmds.next()
                     if self.transactional and cmd_line.cmd != 'EXEC':
-                        response = yield gen.Task(self.process_data, data,
+                        response = yield gen.Task(self.process_data,
+                                                  data,
                                                   CmdLine('MULTI_PART'))
                     else:
                         response = yield gen.Task(self.process_data,

@@ -22,7 +22,7 @@ log = logging.getLogger('app')
 # MAKE SURE A max_connections NUMBER IS GREATER THEN THE
 # NUMBER OF EXPECTED SIMULTANEOUSLY CONNECTED CLIENTS WHEN
 # USING THE CONNECTION POOL FEATURE ON PRODUCTION ENVIRONMENT.
-CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=1,
+CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=3,
                                               wait_for_available=True)
 
 NUMBER_OF_CLIENTS = 5
@@ -40,12 +40,9 @@ class MainHandler(tornado.web.RequestHandler):
         # You may check it using the redis-cli command-line utility
         # and the MONITOR command.
         yield tornado.gen.Task(client.expire, k, 120)
-        # Release the connection.
-        # As the code is wrapped by tornado.gen.engine
-        # decorator it wont destroy the Client object on exit. It's a
-        # good practice to manually disconnect clients connected to the
-        # connection pool. I'll update this demo code when find a workaround
-        # for this issue.
+        # You NEED to manually disconnect clients connected to the
+        # connection pool. I'll update this demo code if discover
+        # a workaround for this issue.
         yield tornado.gen.Task(client.disconnect)
         # Return the number of visits multiplied by specified value
         callback(res)
@@ -74,8 +71,7 @@ class MainHandler(tornado.web.RequestHandler):
         c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
         info = yield tornado.gen.Task(c.info)
         # Release the connection to be reused by connection pool.
-        # See the note in the incr_counter method about
-        # tornado.gen.engine-decorated functions.
+        # See the note in the incr_counter method.
         yield tornado.gen.Task(c.disconnect)
         values = map(lambda n, v: (n, v), indexes, values)
         self.render("template.html",
