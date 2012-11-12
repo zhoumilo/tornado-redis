@@ -1,21 +1,7 @@
-import unittest
-
-from .misc import MiscTestCase
-from .server_commands import ServerCommandsTestCase
-from .pubsub import PubSubTestCase
-from .pipeline import PipelineTestCase
-from .scripting import ScriptingTestCase
-from .reconnect import DisconnectTestCase
-from .pool import ConnectionPoolTestCase
-
-
-def all_tests():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(ServerCommandsTestCase,
-                                     PubSubTestCase,
-                                     PipelineTestCase,
-                                     ScriptingTestCase,
-                                     DisconnectTestCase,
-                                     ConnectionPoolTestCase,
-                                     MiscTestCase, ))
-    return suite
+from misc import *
+from server_commands import *
+from pubsub import *
+from pipeline import *
+from scripting import *
+from reconnect import *
+from pool import *

@@ -18,11 +18,6 @@ class ConnectionPoolTestCase(RedisTestCase):
         connection_params.setdefault('max_connections', 2)
         return tornadoredis.ConnectionPool(**connection_params)
 
-    def _new_client(self, pool=None):
-        client = tornadoredis.Client(connection_pool=pool,
-                                     selected_db=self.test_db)
-        return client
-
     @gen.engine
     def _set_random_using_new_connection(self, pool, key, callback=None):
         c1 = self._new_client(pool)
@@ -30,28 +25,6 @@ class ConnectionPoolTestCase(RedisTestCase):
         yield gen.Task(c1.set, key, v1)
         yield gen.Task(c1.disconnect)
         self.io_loop.add_callback(partial(callback, v1))
-
-    @async_test
-    @gen.engine
-    def test_disconnect_on_destroy(self):
-        '''
-        Find and test the way to destroy client instances in
-        tornado.gen-wrapped functions. Still had no luck with it.
-        '''
-        @gen.engine
-        def some_code(pool, callback=None):
-            c1 = self._new_client(pool)
-            yield gen.Task(c1.get, 'foo')
-            # FIXME: Find a way to destroy the client instance here.
-            yield gen.Task(c1.disconnect)
-            callback(True)
-
-        pool = self._new_pool(max_connections=1)
-        yield gen.Task(some_code, pool)
-        yield gen.Task(some_code, pool)
-        yield gen.Task(some_code, pool)
-
-        self.stop()
 
     def test_max_connections(self):
         pool = self._new_pool(max_connections=2)
@@ -117,3 +90,28 @@ class ConnectionPoolTestCase(RedisTestCase):
         self.assertEqual(v2, v2_saved)
 
         self.stop()
+
+#    @async_test
+#    @gen.engine
+#    def test_for_memory_leaks(self):
+#        '''
+#        Find and test the way to destroy client instances in
+#        tornado.gen-wrapped functions if the connection_pool is used.
+#        Still had no luck with it.
+#        '''
+#        @gen.engine
+#        def some_code(pool, on_client_destroy=None, callback=None):
+#            c1 = self._new_client(pool=pool,on_destroy=on_client_destroy)
+#            yield gen.Task(c1.get, 'foo')
+#            # FIXME: Find a way to destroy the client instance here.
+#            # yield gen.Task(c1.disconnect)
+#            callback(True)
+#
+#        pool = self._new_pool(max_connections=1)
+#
+#        for __ in xrange(1, 3):
+#            yield gen.Task(some_code, pool,
+#                           on_client_destroy=(yield gen.Callback('destroy')))
+#            yield gen.Wait('destroy')
+#
+#        self.stop()

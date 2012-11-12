@@ -13,7 +13,8 @@ class Connection(object):
                  stop_after=None, io_loop=None):
         self.host = host
         self.port = port
-        self.set_event_handler(event_handler)
+        if event_handler:
+            self._event_handler = weakref.proxy(event_handler)
         self.timeout = stop_after
         self._stream = None
         self._io_loop = io_loop
@@ -37,7 +38,7 @@ class Connection(object):
             self.continue_pending()
 
     def continue_pending(self):
-        # Continue with pending command execution
+        # Continue with the pending command execution
         # if all read operations are completed.
         if not self.read_callbacks and self.ready_callbacks:
             # Pop a SINGLE callback from the queue and execute it.
@@ -46,19 +47,10 @@ class Connection(object):
             callback = self.ready_callbacks.popleft()
             callback()
 
-    def set_event_handler(self, event_handler, weak=False):
-        if event_handler:
-            if weak:
-                self._event_handler = event_handler
-            else:
-                self._event_handler = weakref.proxy(event_handler)
-        else:
-            self._event_handler = None
-
     def ready(self):
         return (not self._lock and
-                not self.read_callbacks
-                and not self.ready_callbacks)
+                not self.read_callbacks and
+                not self.ready_callbacks)
 
     def wait_until_ready(self, callback=None):
         if callback:
@@ -184,24 +176,24 @@ class ConnectionPool(object):
         self._in_use_connections = set()
         self._waiting_clients = deque()
 
-    def get_connection(self, event_handler=None):
+    def get_connection(self, event_handler_proxy=None):
         "Get a connection from the pool"
         try:
             connection = self._available_connections.popleft()
         except IndexError:
             connection = self.make_connection()
         if connection:
-            connection.set_event_handler(event_handler)
+            connection._event_handler = event_handler_proxy
             self._in_use_connections.add(connection)
         elif self.wait_for_avaliable:
-            connection = self.make_proxy(client=event_handler)
+            connection = self.make_proxy(client_proxy=event_handler_proxy)
         else:
             raise ConnectionError("Too many connections")
         return connection
 
-    def make_proxy(self, client=None, connected=True):
+    def make_proxy(self, client_proxy=None, connected=True):
         connection = ConnectionProxy(pool=self,
-                                     client=client,
+                                     client_proxy=client_proxy,
                                      connected=connected)
         if connected:
             self._waiting_clients.append(connection)
@@ -222,7 +214,7 @@ class ConnectionPool(object):
             except ValueError:
                 pass
             return
-        connection.set_event_handler(None)
+        connection._event_handler = None
         if self._waiting_clients:
             waiting = self._waiting_clients.popleft()
             waiting.assign_connection(connection)
@@ -245,8 +237,8 @@ class ConnectionProxy(object):
     '''
     A stub object to replace a client's connection until one is available.
     '''
-    def __init__(self, pool=None, client=None, connected=True):
-        self.client = weakref.proxy(client)
+    def __init__(self, pool=None, client_proxy=None, connected=True):
+        self.client = client_proxy
         self.pool = weakref.proxy(pool)
         self.ready_callbacks = []
         self._connected = connected
@@ -275,7 +267,9 @@ class ConnectionProxy(object):
         if self.ready_callbacks:
             connection.ready_callbacks += self.ready_callbacks
             self.ready_callbacks = []
-        connection.set_event_handler(self.client, weak=True)
+        connection._event_handler = self.client
         self.client.connection = connection
         self.pool.release(self)
+        if connection.connected():
+            connection.fire_event('on_connect')
         connection.continue_pending()

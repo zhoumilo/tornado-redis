@@ -1,11 +1,3 @@
-# Demo application for brukva
-# In order to use:
-#  1. $ python app.py
-#  2. Open in your browser that supports websockets: http://localhost:8888/
-#     You should see text that says "Connected..."
-#  3. $ curl http://localhost:8888/msg -d 'message=Hello!'
-#     You should see 'Hello!' in your browser
-
 import tornado.httpserver
 import tornado.web
 import tornado.websocket

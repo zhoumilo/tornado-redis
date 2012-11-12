@@ -1,9 +1,11 @@
-import tornadoredis
+import logging
+
 import tornado.httpserver
 import tornado.web
 import tornado.ioloop
 import tornado.gen
-import logging
+
+import tornadoredis
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -14,6 +16,12 @@ log = logging.getLogger('app')
 # to use with this demo.
 # Let redis clients wait for available connection instead of
 # raising an exception if none is available.
+#
+# DO NOT CREATE A SINGLE-CONNECTION POOLS ON THE PRODUCTION, AS
+# WITH THIS VERSION OF A TORNADO-REDIS LIBRARY IT MAY CAUSE MEMORY LEAKS.
+# MAKE SURE A max_connections NUMBER IS GREATER THEN THE
+# NUMBER OF EXPECTED SIMULTANEOUSLY CONNECTED CLIENTS WHEN
+# USING THE CONNECTION POOL FEATURE ON PRODUCTION ENVIRONMENT.
 CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=1,
                                               wait_for_available=True)
 
@@ -34,10 +42,10 @@ class MainHandler(tornado.web.RequestHandler):
         yield tornado.gen.Task(client.expire, k, 120)
         # Release the connection.
         # As the code is wrapped by tornado.gen.engine
-        # decorator it wont destroy the Client object on exit. So it's a
-        # good practice to explictly disconnect clients connected to the
-        # connection pool. I'll update this demo code if find a workaround
-        # of this issue.
+        # decorator it wont destroy the Client object on exit. It's a
+        # good practice to manually disconnect clients connected to the
+        # connection pool. I'll update this demo code when find a workaround
+        # for this issue.
         yield tornado.gen.Task(client.disconnect)
         # Return the number of visits multiplied by specified value
         callback(res)
@@ -65,7 +73,7 @@ class MainHandler(tornado.web.RequestHandler):
         # Create a new client and get
         c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
         info = yield tornado.gen.Task(c.info)
-        # Explictly release the connection to be reused by connection pool.
+        # Release the connection to be reused by connection pool.
         # See the note in the incr_counter method about
         # tornado.gen.engine-decorated functions.
         yield tornado.gen.Task(c.disconnect)

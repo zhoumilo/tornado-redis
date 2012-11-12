@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from itertools import izip
 import logging
+import weakref
 
 from tornado.ioloop import IOLoop
 from tornado import gen
@@ -151,7 +152,8 @@ class Client(object):
         self._io_loop = io_loop or IOLoop.instance()
         self._connection_pool = connection_pool
         if connection_pool:
-            connection = connection_pool.get_connection(event_handler=self)
+            connection = (connection_pool
+                          .get_connection(event_handler_proxy=weakref.proxy(self)))
         else:
             connection = Connection(host=host, port=port,
                                     event_handler=self,
@@ -196,7 +198,14 @@ class Client(object):
         self._pipeline = None
 
     def __del__(self):
-        self.disconnect(destroying=True)
+        try:
+            connection = self.connection
+            pool = self._connection_pool
+        except AttributeError:
+            connection = None
+            pool = None
+        if connection and pool:
+            pool.release(connection)
 
     def __repr__(self):
         return 'tornadoredis.Client (db=%s)' % (self.selected_db)
@@ -214,18 +223,16 @@ class Client(object):
 
         Usage:
             pipe = self.client.pipeline()
-            pipe.delete('foo')
-            pipe.delete('bar')
-            pipe.delete('foo2')
+            pipe.hset('foo', 'bar', 1)
+            pipe.expire('foo', 60)
 
             yield gen.Task(pipe.execute)
 
         or:
 
             with self.client.pipeline() as pipe:
-                pipe.delete('foo')
-                pipe.delete('bar')
-                pipe.delete('foo2')
+                pipe.hset('foo', 'bar', 1)
+                pipe.expire('foo', 60)
 
                 yield gen.Task(pipe.execute)
         '''
@@ -268,22 +275,19 @@ class Client(object):
                 self.connection.connect()
 
     @gen.engine
-    def disconnect(self, destroying=False, callback=None):
+    def disconnect(self, callback=None):
         '''
         Disconnect from the Redis server.
-        Do not pass in the 'force' argument (it's for internal use only).
         '''
-        try:
-            connection = self.connection
-        except AttributeError:
-            connection = None
+        connection = self.connection
         if connection:
             pool = self._connection_pool
             if pool:
                 pool.release(connection)
                 yield gen.Task(connection.wait_until_ready)
-                self.connection = pool.make_proxy(client=self,
-                                                  connected=False)
+                proxy = pool.make_proxy(client_proxy=weakref.proxy(self),
+                                        connected=False)
+                self.connection = proxy
             else:
                 self.connection.disconnect()
         if callback:
