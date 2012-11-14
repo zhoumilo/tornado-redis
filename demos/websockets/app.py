@@ -28,7 +28,7 @@ class MessagesCatcher(tornado.websocket.WebSocketHandler):
     def __init__(self, *args, **kwargs):
         super(MessagesCatcher, self).__init__(*args, **kwargs)
         self.listen()
-    
+
     @tornado.gen.engine
     def listen(self):
         self.client = tornadoredis.Client()

@@ -51,13 +51,15 @@ class MainHandler(tornado.web.RequestHandler):
                    for __ in indexes)
 
         # Register page views using %NUMBER_OF_CLIENTS% redis clients.
-        # Run redis commands "simultaneously" to .
+        # Run redis commands "simultaneously" to simulate a complex
+        # application creating a number of Client instances.
         values = yield map(lambda c, n: tornado.gen.Task(self.incr_counter,
                                                          c, n),
                            clients,
                            indexes)
 
-        # Create a new client and get
+        # Create a new client and get the redis server information
+        # to display it on a demo page.
         c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
         info = yield tornado.gen.Task(c.info)
         values = map(lambda n, v: (n, v), indexes, values)
