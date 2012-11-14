@@ -12,17 +12,11 @@ logging.basicConfig(level=logging.DEBUG)
 
 log = logging.getLogger('app')
 
-# Create a global redis connection pool of a single connection
-# to use with this demo.
+# Create a global redis connection pool of
+# ten Redis server connections to use with this demo.
 # Let redis clients wait for available connection instead of
 # raising an exception if none is available.
-#
-# DO NOT CREATE A SINGLE-CONNECTION POOLS ON THE PRODUCTION, AS
-# WITH THIS VERSION OF A TORNADO-REDIS LIBRARY IT MAY CAUSE MEMORY LEAKS.
-# MAKE SURE A max_connections NUMBER IS GREATER THEN THE
-# NUMBER OF EXPECTED SIMULTANEOUSLY CONNECTED CLIENTS WHEN
-# USING THE CONNECTION POOL FEATURE ON PRODUCTION ENVIRONMENT.
-CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=3,
+CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=10,
                                               wait_for_available=True)
 
 NUMBER_OF_CLIENTS = 5
@@ -40,10 +34,6 @@ class MainHandler(tornado.web.RequestHandler):
         # You may check it using the redis-cli command-line utility
         # and the MONITOR command.
         yield tornado.gen.Task(client.expire, k, 120)
-        # You NEED to manually disconnect clients connected to the
-        # connection pool. I'll update this demo code if discover
-        # a workaround for this issue.
-        yield tornado.gen.Task(client.disconnect)
         # Return the number of visits multiplied by specified value
         callback(res)
 
@@ -70,9 +60,6 @@ class MainHandler(tornado.web.RequestHandler):
         # Create a new client and get
         c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
         info = yield tornado.gen.Task(c.info)
-        # Release the connection to be reused by connection pool.
-        # See the note in the incr_counter method.
-        yield tornado.gen.Task(c.disconnect)
         values = map(lambda n, v: (n, v), indexes, values)
         self.render("template.html",
                     title="Connection Pool Demo",
