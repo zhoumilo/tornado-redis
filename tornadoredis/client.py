@@ -105,7 +105,8 @@ def reply_info(response):
     info = {}
 
     def get_value(value):
-        if ',' not in value:
+        # Does this string contains subvalues?
+        if (',' not in value) or ('=' not in value):
             return value
         sub_dict = {}
         for item in value.split(','):
