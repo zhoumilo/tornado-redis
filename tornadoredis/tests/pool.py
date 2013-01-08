@@ -5,10 +5,9 @@ from random import randint
 from tornado import gen
 
 import tornadoredis
-
-from redistest import RedisTestCase
 from tornadoredis.exceptions import ConnectionError
-from tornadoredis.tests.redistest import async_test
+
+from redistest import RedisTestCase, async_test
 
 
 class ConnectionPoolTestCase(RedisTestCase):

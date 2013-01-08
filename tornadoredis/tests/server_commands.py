@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
+import time as mod_time
 
 from tornado import gen
 
@@ -27,12 +29,12 @@ class ServerCommandsTestCase(RedisTestCase):
     @async_test
     @gen.engine
     def test_delete(self):
-        res = yield gen.Task(self.client.mset, {'a': 1, 'b': 2, 'c': 3})
-        res = yield gen.Task(self.client.delete, 'a')
+        yield gen.Task(self.client.mset, {'a': 1, 'b': 2, 'c': 3})
+        yield gen.Task(self.client.delete, 'a')
         res = yield gen.Task(self.client.exists, 'a')
         self.assertEqual(res, False)
 
-        res = yield gen.Task(self.client.delete, 'b', 'c')
+        yield gen.Task(self.client.delete, 'b', 'c')
         res = yield gen.Task(self.client.exists, 'b')
         self.assertEqual(res, False)
         res = yield gen.Task(self.client.exists, 'c')
@@ -156,6 +158,57 @@ class ServerCommandsTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_expireat(self):
+        res = yield gen.Task(self.client.set, 'a', 1)
+        self.assertEqual(res, True)
+        t_expire = int(mod_time.time()) + 10
+        res = yield gen.Task(self.client.expireat, 'a', t_expire)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.ttl, 'a')
+        self.assertIn(res, (9, 10, 11))
+
+        t_expire = datetime.now() + timedelta(seconds=10)
+        res = yield gen.Task(self.client.expireat, 'a', t_expire)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.ttl, 'a')
+        self.assertIn(res, (9, 10, 11))
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_pexpire(self):
+        res = yield gen.Task(self.client.set, 'a', 1)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.pexpire, 'a', 10)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.pttl, 'a')
+        self.assertLessEqual(res, 10)
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_pexpireat(self):
+        res = yield gen.Task(self.client.set, 'a', 1)
+        self.assertEqual(res, True)
+        t_expire = (int(mod_time.time()) + 2) * 1000
+        res = yield gen.Task(self.client.pexpireat, 'a', t_expire)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.pttl, 'a')
+        self.assertLessEqual(res, 2000)
+        self.assertGreater(res, 1000)
+
+        t_expire = datetime.now() + timedelta(seconds=1)
+        res = yield gen.Task(self.client.pexpireat, 'a', t_expire)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.pttl, 'a')
+        self.assertLessEqual(res, 1000)
+        self.assertGreater(res, 800)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_type(self):
         res = yield gen.Task(self.client.set, 'a', 1)
         self.assertEqual(res, True)
@@ -163,6 +216,10 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, 'string')
         res = yield gen.Task(self.client.rpush, 'b', 1)
         self.assertEqual(res, True)
+        res = yield gen.Task(self.client.rpushx, 'b', 1)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.rpushx, 'c', 1)
+        self.assertFalse(res)
         res = yield gen.Task(self.client.type, 'b')
         self.assertEqual(res, 'list')
         res = yield gen.Task(self.client.sadd, 'c', 1)
@@ -296,6 +353,36 @@ class ServerCommandsTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_hdel(self):
+        res = yield gen.Task(self.client.hmset, 'foo', {'a': 1, 'b': 2, 'c': 3})
+        self.assertEqual(res, True)
+        yield gen.Task(self.client.hdel, 'foo', 'a', 'b')
+        res = yield gen.Task(self.client.hkeys, 'foo')
+        self.assertEqual(res, ['c'])
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_hincrbyfloat(self):
+        yield gen.Task(self.client.hset, 'mykey', 'field', '10.5')
+        res = yield gen.Task(self.client.hincrbyfloat, 'mykey', 'field', '0.1')
+        self.assertEqual(res, '10.6')
+        res = yield gen.Task(self.client.hget, 'mykey', 'field')
+        self.assertEqual(res, '10.6')
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_hsetnx(self):
+        res = yield gen.Task(self.client.hsetnx, 'mykey', 'field', 'Hello')
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.hsetnx, 'mykey', 'field', 'Hello')
+        self.assertFalse(res)
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_incrdecr(self):
         res = yield gen.Task(self.client.incr, 'foo')
         self.assertEqual(res, 1)
@@ -307,6 +394,14 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, 0)
         res = yield gen.Task(self.client.decr, 'foo')
         self.assertEqual(res, -1)
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_incrbyfloat(self):
+        yield gen.Task(self.client.set, 'mykey', '10.50')
+        res = yield gen.Task(self.client.incrbyfloat, 'mykey', '0.1')
+        self.assertEqual(res, '10.6')
         self.stop()
 
     @async_test
@@ -329,6 +424,24 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, '1')
         res = yield gen.Task(self.client.llen, 'foo')
         self.assertEqual(res, 0)
+
+        res = yield gen.Task(self.client.lpush, 'foo', 2, 3, 4)
+        self.assertEqual(res, 3)
+        res = yield gen.Task(self.client.llen, 'foo')
+        self.assertEqual(res, 3)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_lpushx(self):
+        res = yield gen.Task(self.client.lpushx, 'foo', 1)
+        self.assertFalse(res)
+        res = yield gen.Task(self.client.lpush, 'foo', 1)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.lpushx, 'foo', 1)
+        self.assertEqual(res, 2)
+
         self.stop()
 
     @async_test
@@ -395,6 +508,18 @@ class ServerCommandsTestCase(RedisTestCase):
         yield gen.Task(c2.rpush, 'foo', 'zz')
         res = yield gen.Wait("blpop")
         self.assertEqual(res, {'foo': 'zz'})
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_linsert(self):
+        yield gen.Task(self.client.rpush, 'mylist', 'Hello')
+        yield gen.Task(self.client.rpush, 'mylist', 'World')
+        res = yield gen.Task(self.client.linsert, 'mylist', 'BEFORE', 'World', 'There')
+        self.assertEqual(res, 3)
+        res = yield gen.Task(self.client.lrange, 'mylist', 0, -1)
+        self.assertEqual(res, ['Hello', 'There', 'World'])
 
         self.stop()
 
@@ -624,6 +749,21 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, long_list)
         self.stop()
 
+    @async_test
+    @gen.engine
+    def test_zrem(self):
+        yield gen.Task(self.client.zadd, 'myzset', 1, 'one')
+        yield gen.Task(self.client.zadd, 'myzset', 2, 'two')
+        yield gen.Task(self.client.zadd, 'myzset', 3, 'three')
+        yield gen.Task(self.client.zadd, 'myzset', 4, 'four')
+        res = yield gen.Task(self.client.zrem, 'myzset', 'two')
+        self.assertEqual(res, 1)
+        res = yield gen.Task(self.client.zrem, 'myzset', 'three', 'four')
+        self.assertEqual(res, 2)
+        res = yield gen.Task(self.client.zrange, 'myzset', 0, -1, False)
+        self.assertEqual(res, ['one'])
+        self.stop()
+
     @gen.engine
     def _make_list(self, key, items, callback=None):
         yield gen.Task(self.client.delete, key)
@@ -726,6 +866,30 @@ class ServerCommandsTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_bitcount(self):
+        yield gen.Task(self.client.set, 'mykey', 'foobar')
+        r1 = yield gen.Task(self.client.bitcount, 'mykey')
+        self.assertEqual(r1, 26)
+        r2 = yield gen.Task(self.client.bitcount, 'mykey', 0, 0)
+        self.assertEqual(r2, 4)
+        r3 = yield gen.Task(self.client.bitcount, 'mykey', 1, 1)
+        self.assertEqual(r3, 6)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_bitop(self):
+        yield gen.Task(self.client.set, 'key1', 'foobar')
+        yield gen.Task(self.client.set, 'key2', 'abcdef')
+        yield gen.Task(self.client.bitop, 'AND', 'dest', 'key1', 'key2')
+        res = yield gen.Task(self.client.get, 'dest')
+        self.assertEqual(res, '`bc`ab')
+
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_sync_command_calls(self):
         # In general, one shouldn't execute redis commands this way.
         # Client methods SHOULD be invoked via gen.Task
@@ -749,5 +913,123 @@ class ServerCommandsTestCase(RedisTestCase):
         info = yield gen.Task(self.client.info)
         self.assertTrue(info)
         self.assertIn('redis_version', info)
+
+        self.stop()
+
+        info_clients = yield gen.Task(self.client.info, section_name='clients')
+        self.assertTrue(info_clients)
+        self.assertIn('connected_clients', info_clients)
+        self.assertNotIn('redis_version', info_clients)
+
+    @async_test
+    @gen.engine
+    def test_echo(self):
+        v = '%08d' % random.randint(1, 1000)
+        res = yield gen.Task(self.client.echo, v)
+        self.assertEqual(res, v)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_time(self):
+        unixtime, mics = yield gen.Task(self.client.time)
+        self.assertTrue(unixtime)
+        self.assertTrue(mics)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_getrange(self):
+        yield gen.Task(self.client.set, 'mykey', 'This is a string')
+        s = yield gen.Task(self.client.getrange, 'mykey', 0, 3)
+        self.assertEqual(s, 'This')
+        s = yield gen.Task(self.client.getrange, 'mykey', -3, -1)
+        self.assertEqual(s, 'ing')
+        s = yield gen.Task(self.client.getrange, 'mykey', 0, -1)
+        self.assertEqual(s, 'This is a string')
+        s = yield gen.Task(self.client.getrange, 'mykey', 10, 100)
+        self.assertEqual(s, 'string')
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_object(self):
+        yield gen.Task(self.client.set, 'foo', 12)
+        t = yield gen.Task(self.client.object, 'encoding', 'foo')
+        self.assertEqual(t, 'int')
+        yield gen.Task(self.client.set, 'foo', 's')
+        t = yield gen.Task(self.client.object, 'encoding', 'foo')
+        self.assertEqual(t, 'raw')
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_persist(self):
+        res = yield gen.Task(self.client.setex, 'foo', 5, 'bar')
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.ttl, 'foo')
+        self.assertEqual(res, 5)
+        yield gen.Task(self.client.persist, 'foo')
+        res = yield gen.Task(self.client.ttl, 'foo')
+        self.assertEqual(res, None)
+        res = yield gen.Task(self.client.get, 'foo')
+        self.assertEqual(res, 'bar')
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_v2_2(self):
+        res = yield gen.Task(self.client.rpush, 'mylist', 1, 2, 3, 4, 5)
+        self.assertEqual(res, 5)
+        res = yield gen.Task(self.client.lrange, 'mylist', 0, -1)
+        self.assertEqual(res, ['1', '2', '3', '4', '5'])
+
+        res = yield gen.Task(self.client.lrange, 'mylist', 0, -1)
+        self.assertEqual(res, ['1', '2', '3', '4', '5'])
+
+        res = yield gen.Task(self.client.sadd, 'myset', 1, 2, 3, 4)
+        self.assertEqual(res, 4)
+        res = yield gen.Task(self.client.sismember, 'myset', 3)
+        self.assertTrue(res)
+
+        res = yield gen.Task(self.client.srem, 'myset', 2, 3)
+        self.assertEqual(res, 2)
+        res = yield gen.Task(self.client.scard, 'myset')
+        self.assertEqual(res, 2)
+
+        yield gen.Task(self.client.set, 'key1', 'Hello World')
+        res = yield gen.Task(self.client.setrange, 'key1', 6, 'Redis')
+        self.assertEqual(res, 11)
+        res = yield gen.Task(self.client.get, 'key1')
+        self.assertEqual(res, 'Hello Redis')
+
+        res = yield gen.Task(self.client.strlen, 'key1')
+        self.assertEqual(res, 11)
+
+        res = yield gen.Task(self.client.zadd, 'myzset', 0, 'one', 1, 'two')
+        self.assertEqual(res, 2)
+        res = yield gen.Task(self.client.zrange, 'myzset', 0, -1, False)
+        self.assertEqual(res, ['one', 'two'])
+        res = yield gen.Task(self.client.zcount, 'myzset', 1, 5)
+        self.assertEqual(res, 1)
+        res = yield gen.Task(self.client.zcount, 'myzset', 0, 2)
+        self.assertEqual(res, 2)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_v2_6(self):
+        vals = [1, 2, 3, 4]
+        yield gen.Task(self.client.sadd, 'myset', *vals)
+        res = yield gen.Task(self.client.srandmember, 'myset', 2)
+        self.assertEqual(len(res), 2)
+        self.assertIn(int(res[0]), vals)
+        self.assertIn(int(res[1]), vals)
 
         self.stop()

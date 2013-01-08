@@ -8,7 +8,6 @@ from tornado.testing import AsyncTestCase
 
 import tornadoredis
 from tornadoredis.exceptions import ConnectionError
-from tornadoredis.tests.redistest import async_test, RedisTestCase
 
 
 class DisconnectingRedisServer(TCPServer):
@@ -43,7 +42,6 @@ class DisconnectingRedisServer(TCPServer):
         self._stream = None
 
 
-# RedisTestCase
 class DisconnectTestCase(AsyncTestCase):
     test_db = 9
     test_port = 6380

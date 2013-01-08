@@ -99,6 +99,7 @@ class PipelineTestCase(RedisTestCase):
 
         res = yield gen.Task(pipe.execute)
         self.assertEqual(res, ['123', {'zar': 'gza'}])
+
         self.stop()
 
     @async_test
@@ -112,6 +113,7 @@ class PipelineTestCase(RedisTestCase):
         pipe.get('bar')
         res = yield gen.Task(pipe.execute)
         self.assertEqual(res, ['zar', ])
+
         self.stop()
 
     @async_test
@@ -127,6 +129,22 @@ class PipelineTestCase(RedisTestCase):
         pipe.get('foo')
         res = yield gen.Task(pipe.execute)
         self.assertEqual(res, [])
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_pipe_watch3(self):
+        res = yield gen.Task(self.client.set, 'foo', 'bar')
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.watch, 'foo1', 'foo2', 'foo')
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.set, 'foo', 'zar')
+        self.assertTrue(res)
+        pipe = self.client.pipeline(transactional=True)
+        pipe.get('foo')
+        res = yield gen.Task(pipe.execute)
+
         self.stop()
 
     @async_test
@@ -144,6 +162,7 @@ class PipelineTestCase(RedisTestCase):
         pipe.get('foo')
         res = yield gen.Task(pipe.execute)
         self.assertEqual(res, ['zar'])
+
         self.stop()
 
     @async_test
