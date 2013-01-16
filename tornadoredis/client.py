@@ -297,7 +297,7 @@ class Client(object):
             pool = self._connection_pool
             if pool:
                 old_conn = self.connection
-                self.connection = pool.get_connection(event_handler=self)
+                self.connection = pool.get_connection(event_handler_proxy=self)
                 self.connection.ready_callbacks = old_conn.ready_callbacks
             else:
                 self.connection.connect()
