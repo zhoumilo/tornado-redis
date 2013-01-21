@@ -21,3 +21,5 @@ class ScriptingTestCase(RedisTestCase):
         self.assertEqual(2, results)
 
         self.stop()
+
+    # TODO: script_exists, script_load, script_flush, script_kill

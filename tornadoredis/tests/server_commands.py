@@ -184,6 +184,13 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, True)
         res = yield gen.Task(self.client.pttl, 'a')
         self.assertLessEqual(res, 10)
+
+        res = yield gen.Task(self.client.pexpire, 'a',
+                             timedelta(milliseconds=10))
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.pttl, 'a')
+        self.assertLessEqual(res, 10)
+
         self.stop()
 
     @async_test
@@ -235,6 +242,8 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.type, 'e')
         self.assertEqual(res, 'zset')
         self.stop()
+
+    # TODO: zrevrangebyscore
 
     @async_test
     @gen.engine
@@ -430,6 +439,25 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.llen, 'foo')
         self.assertEqual(res, 3)
 
+        res = yield gen.Task(self.client.lrem, 'foo', 2)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.llen, 'foo')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(self.client.lset, 'foo', 0, 5)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.llen, 'foo')
+        self.assertEqual(res, 2)
+        res = yield gen.Task(self.client.lindex, 'foo', 0)
+        self.assertEqual(res, '5')
+
+        res = yield gen.Task(self.client.ltrim, 'foo', 0, 0)
+        self.assertTrue(res)
+        res = yield gen.Task(self.client.lpop, 'foo')
+        self.assertEqual(res, '5')
+        res = yield gen.Task(self.client.llen, 'foo')
+        self.assertEqual(res, 0)
+
         self.stop()
 
     @async_test
@@ -465,6 +493,21 @@ class ServerCommandsTestCase(RedisTestCase):
         yield gen.Task(c2.lpush, 'foo', 'zz')
         res = yield gen.Wait("brpop")
         self.assertEqual(res, {'foo': 'zz'})
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_rpoplpush(self):
+        res = yield gen.Task(self.client.lpush, 'foo', 'ab')
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.lpush, 'bar', 'cd')
+        self.assertEqual(res, True)
+
+        res = yield gen.Task(self.client.rpoplpush, 'foo', 'bar')
+        self.assertEqual(res, 'ab')
+        res = yield gen.Task(self.client.lpop, 'bar')
+        self.assertEqual(res, 'ab')
 
         self.stop()
 
