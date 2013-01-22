@@ -273,25 +273,13 @@ class Client(object):
         '''
         if not self._pipeline:
             self._pipeline = Pipeline(
+                transactional=transactional,
                 selected_db=self.selected_db,
+                password=self.password,
                 io_loop=self._io_loop,
-                transactional=transactional
             )
             self._pipeline.connection = self.connection
         return self._pipeline
-
-    #### Connection event handlers
-    def on_connect(self):
-        if self.password:
-            password = self.connection.info.get('password', None)
-            if password != self.password:
-                self.auth(self.password)
-                self.connection.info['password'] = self.password
-        if self.selected_db:
-            db = self.connection.info.get('db', None)
-            if db != self.selected_db:
-                self.select(self.selected_db)
-                self.connection.info['db'] = self.selected_db
 
     def on_disconnect(self):
         if self.subscribed:
@@ -377,36 +365,46 @@ class Client(object):
             if not self.connection.connected():
                 self.connection.connect()
 
-            if not self.connection.ready() and not self.subscribed:
+            if not self.connection.ready():
                 yield gen.Task(self.connection.wait_until_ready)
 
-            with self.connection as c:
-                command = self.format_command(cmd, *args, **kwargs)
-                try:
-                    yield gen.Task(self.connection.write, command)
-                except Exception, e:
-                    self.connection.disconnect()
-                    if not n_tries:
-                        raise e
-                    else:
-                        continue
+            if not self.subscribed and cmd not in ('AUTH', 'SELECT'):
+                if (self.password and
+                    self.connection.info.get('pass', None) != self.password):
+                    yield gen.Task(self.auth, self.password)
+                if (self.selected_db and
+                    self.connection.info.get('db', None) != self.selected_db):
+                    yield gen.Task(self.select, self.selected_db)
 
-                if ((cmd in PUB_SUB_COMMANDS) or
-                    (self.subscribed and cmd == 'PUBLISH')):
-                    result = True
-                    break
+            command = self.format_command(cmd, *args, **kwargs)
+            try:
+                yield gen.Task(self.connection.write, command)
+            except Exception, e:
+                self.connection.disconnect()
+                if not n_tries:
+                    raise e
                 else:
-                    result = None
-                    data = yield gen.Task(c.readline)
-                    if not data:
-                        if not n_tries:
-                            raise ConnectionError('no data received')
-                    else:
-                        resp = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_line)
-                        result = self.format_reply(cmd_line, resp)
-                        break
+                    continue
+
+            if ((cmd in PUB_SUB_COMMANDS) or
+                (self.subscribed and cmd == 'PUBLISH')):
+                result = True
+                break
+            else:
+                result = None
+                data = yield gen.Task(self.connection.readline)
+                if not data:
+                    if not n_tries:
+                        raise ConnectionError('no data received')
+                else:
+                    resp = yield gen.Task(self.process_data,
+                                          data,
+                                          cmd_line)
+                    result = self.format_reply(cmd_line, resp)
+                    break
+
+        if cmd not in ('AUTH', 'SELECT'):
+            self.connection.execute_pending_command()
 
         if callback:
             callback(result)
@@ -500,7 +498,11 @@ class Client(object):
 
     def select(self, db, callback=None):
         self.selected_db = db
-        self.execute_command('SELECT', db, callback=callback)
+        if self.connection.info.get('db', None) != db:
+            self.connection.info['db'] = db
+            self.execute_command('SELECT', db, callback=callback)
+        elif callback:
+            callback(True)
 
     def shutdown(self, callback=None):
         self.execute_command('SHUTDOWN', callback=callback)
@@ -518,7 +520,12 @@ class Client(object):
         self.execute_command('KEYS', pattern, callback=callback)
 
     def auth(self, password, callback=None):
-        self.execute_command('AUTH', password, callback=callback)
+        self.password = password
+        if self.connection.info.get('pass', None) != password:
+            self.connection.info['pass'] = password
+            self.execute_command('AUTH', password, callback=callback)
+        elif callback:
+            callback(True)
 
     ### BASIC KEY COMMANDS
     def append(self, key, value, callback=None):
@@ -990,25 +997,24 @@ class Client(object):
                     return e
 
             cmd_listen = CmdLine('LISTEN')
-            with self.connection as c:
-                while self.subscribed:
-                    data = yield gen.Task(c.readline)
-                    if isinstance(data, Exception):
-                        raise data
+            while self.subscribed:
+                data = yield gen.Task(self.connection.readline)
+                if isinstance(data, Exception):
+                    raise data
 
-                    # TODO: Handle disconnects (data will be None)
-                    response = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_listen)
-                    if isinstance(response, Exception):
-                        raise response
+                # TODO: Handle disconnects (data will be None)
+                response = yield gen.Task(self.process_data,
+                                          data,
+                                          cmd_listen)
+                if isinstance(response, Exception):
+                    raise response
 
-                    result = self.format_reply(cmd_listen, response)
+                result = self.format_reply(cmd_listen, response)
 
-                    callback(result)
-                    if result.kind in ['unsubscribe', 'punsubscribe'] \
-                    and result.body == 0:
-                        self.on_unsubscribed()
+                callback(result)
+                if result.kind in ['unsubscribe', 'punsubscribe'] \
+                and result.body == 0:
+                    self.on_unsubscribed()
 
     ### CAS
     def watch(self, *key_names, **kwargs):
@@ -1100,6 +1106,13 @@ class Pipeline(Client):
 
         request = self.format_pipeline_request(command_stack)
 
+        if (self.password and
+            self.connection.info.get('pass', None) != self.password):
+            yield gen.Task(self.auth, self.password)
+        if (self.selected_db and
+            self.connection.info.get('db', None) != self.selected_db):
+            r = yield gen.Task(self.select, self.selected_db)
+
         if not self.connection.ready():
             yield gen.Task(self.connection.wait_until_ready)
 
@@ -1118,24 +1131,23 @@ class Pipeline(Client):
         total = len(command_stack)
         cmds = iter(command_stack)
 
-        with self.connection:
-            while len(responses) < total:
-                data = yield gen.Task(self.connection.readline)
-                if not data:
-                    raise ResponseError('Not enough data after EXEC')
-                try:
-                    cmd_line = cmds.next()
-                    if self.transactional and cmd_line.cmd != 'EXEC':
-                        response = yield gen.Task(self.process_data,
-                                                  data,
-                                                  CmdLine('MULTI_PART'))
-                    else:
-                        response = yield gen.Task(self.process_data,
-                                                  data,
-                                                  cmd_line)
-                    responses.append(response)
-                except Exception, e:
-                    responses.append(e)
+        while len(responses) < total:
+            data = yield gen.Task(self.connection.readline)
+            if not data:
+                raise ResponseError('Not enough data after EXEC')
+            try:
+                cmd_line = cmds.next()
+                if self.transactional and cmd_line.cmd != 'EXEC':
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              CmdLine('MULTI_PART'))
+                else:
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              cmd_line)
+                responses.append(response)
+            except Exception, e:
+                responses.append(e)
 
         if self.transactional:
             command_stack = command_stack[:-1]
@@ -1143,5 +1155,7 @@ class Pipeline(Client):
             results = self.format_replies(command_stack[1:], responses)
         else:
             results = self.format_replies(command_stack, responses)
+
+        self.connection.execute_pending_command()
 
         callback(results)

@@ -25,21 +25,12 @@ class Connection(object):
         self.read_callbacks = []
         self.ready_callbacks = deque()
         self._lock = 0
-        self.info = {}
+        self.info = {'db': 0}
 
     def __del__(self):
         self.disconnect()
 
-    def __enter__(self):
-        self._lock += 1
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._lock -= 1
-        if not self._lock:
-            self.continue_pending()
-
-    def continue_pending(self):
+    def execute_pending_command(self):
         # Continue with the pending command execution
         # if all read operations are completed.
         if not self.read_callbacks and self.ready_callbacks:
@@ -50,8 +41,7 @@ class Connection(object):
             callback()
 
     def ready(self):
-        return (not self._lock and
-                not self.read_callbacks and
+        return (not self.read_callbacks and
                 not self.ready_callbacks)
 
     def wait_until_ready(self, callback=None):
@@ -60,7 +50,6 @@ class Connection(object):
                 self.ready_callbacks.append(callback)
             else:
                 callback()
-        return self
 
     def connect(self):
         if not self._stream:
@@ -103,10 +92,8 @@ class Connection(object):
 
     def write(self, data, callback=None):
         if not self._stream:
-            self.connect()
-            if not self._stream:
-                raise ConnectionError('Tried to write to '
-                                      'non-existent connection')
+            raise ConnectionError('Tried to write to '
+                                  'non-existent connection')
 
         if callback:
             _callback = lambda: callback(None)
@@ -262,6 +249,9 @@ class ConnectionProxy(object):
             self.ready_callbacks.append(callback)
         return self
 
+    def execute_pending_command(self):
+        pass
+
     def assign_connection(self, connection):
         '''
         Replace this pending connection with the real one.
@@ -274,4 +264,4 @@ class ConnectionProxy(object):
         self.pool.release(self)
         if connection.connected():
             connection.fire_event('on_connect')
-        connection.continue_pending()
+        connection.execute_pending_command()
