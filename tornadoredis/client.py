@@ -3,11 +3,12 @@ from functools import partial
 from itertools import izip
 import logging
 import weakref
+import datetime
+import time as mod_time
 
 from tornado.ioloop import IOLoop
 from tornado import gen
 
-from datetime import datetime
 from .exceptions import RequestError, ConnectionError, ResponseError
 from .connection import Connection
 
@@ -84,7 +85,7 @@ def reply_float(r, *args, **kwargs):
 
 
 def reply_datetime(r, *args, **kwargs):
-    return datetime.fromtimestamp(int(r))
+    return datetime.datetime.fromtimestamp(int(r))
 
 
 def reply_pubsub_message(r, *args, **kwargs):
@@ -101,11 +102,11 @@ def reply_hmget(r, key, *fields, **kwargs):
     return dict(zip(fields, r))
 
 
-def reply_info(response):
+def reply_info(response, *args):
     info = {}
 
     def get_value(value):
-        # Does this string contains subvalues?
+        # Does this string contain subvalues?
         if (',' not in value) or ('=' not in value):
             return value
         sub_dict = {}
@@ -151,8 +152,13 @@ PUB_SUB_COMMANDS = set([
 REPLY_MAP = dict_merge(
     string_keys_to_dict('AUTH BGREWRITEAOF BGSAVE DEL EXISTS '
                         'EXPIRE HDEL HEXISTS '
-                        'HMSET MOVE MSET MSETNX SAVE SETNX',
+                        'HMSET MOVE PERSIST RENAMENX SISMEMBER SMOVE '
+                        'SETEX SAVE SETNX MSET',
                         reply_to_bool),
+    string_keys_to_dict('BITCOUNT DECRBY GETBIT HLEN INCRBY LINSERT '
+                        'LPUSHX RPUSHX SADD SCARD SDIFFSTORE SETBIT SETRANGE '
+                        'SINTERSTORE STRLEN SUNIONSTORE SETRANGE',
+                        reply_int),
     string_keys_to_dict('FLUSHALL FLUSHDB SELECT SET SETEX '
                         'SHUTDOWN RENAME RENAMENX WATCH UNWATCH',
                         make_reply_assert_msg('OK')),
@@ -172,12 +178,13 @@ REPLY_MAP = dict_merge(
     string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE '
                         'ZREVRANGEBYSCORE',
                         reply_zset),
-    {'HMGET': reply_hmget},
-    {'PING': make_reply_assert_msg('PONG')},
-    {'LASTSAVE': reply_datetime},
-    {'TTL': reply_ttl},
-    {'INFO': reply_info},
-    {'MULTI_PART': make_reply_assert_msg('QUEUED')},
+    {'HMGET': reply_hmget,
+     'PING': make_reply_assert_msg('PONG'),
+     'LASTSAVE': reply_datetime,
+     'TTL': reply_ttl,
+     'INFO': reply_info,
+     'MULTI_PART': make_reply_assert_msg('QUEUED'),
+     'TIME': lambda x: (int(x[0]), int(x[1]))}
 )
 
 
@@ -227,11 +234,11 @@ class Client(object):
         pass
 
     def __getattribute__(self, item):
-        '''
+        """
         Bind methods to the weak proxy to avoid memory leaks
         when bound method is passed as argument to the gen.Task
         constructor.
-        '''
+        """
         a = super(Client, self).__getattribute__(item)
         try:
             if callable(a) and a.__self__:
@@ -246,7 +253,7 @@ class Client(object):
 
     def pipeline(self, transactional=False):
         '''
-        Create the 'Pipeline' to pack multiple redis commands
+        Creates the 'Pipeline' to pack multiple redis commands
         in a single request.
 
         Usage:
@@ -266,25 +273,13 @@ class Client(object):
         '''
         if not self._pipeline:
             self._pipeline = Pipeline(
+                transactional=transactional,
                 selected_db=self.selected_db,
+                password=self.password,
                 io_loop=self._io_loop,
-                transactional=transactional
             )
             self._pipeline.connection = self.connection
         return self._pipeline
-
-    #### Connection event handlers
-    def on_connect(self):
-        if self.password:
-            password = self.connection.info.get('password', None)
-            if password != self.password:
-                self.auth(self.password)
-                self.connection.info['password'] = self.password
-        if self.selected_db:
-            db = self.connection.info.get('db', None)
-            if db != self.selected_db:
-                self.select(self.selected_db)
-                self.connection.info['db'] = self.selected_db
 
     def on_disconnect(self):
         if self.subscribed:
@@ -297,7 +292,7 @@ class Client(object):
             pool = self._connection_pool
             if pool:
                 old_conn = self.connection
-                self.connection = pool.get_connection(event_handler=self)
+                self.connection = pool.get_connection(event_handler_proxy=self)
                 self.connection.ready_callbacks = old_conn.ready_callbacks
             else:
                 self.connection.connect()
@@ -305,7 +300,7 @@ class Client(object):
     @gen.engine
     def disconnect(self, callback=None):
         '''
-        Disconnect from the Redis server.
+        Disconnects from the Redis server.
         '''
         connection = self.connection
         if connection:
@@ -353,6 +348,8 @@ class Client(object):
 
     @gen.engine
     def execute_command(self, cmd, *args, **kwargs):
+        result = None
+
         callback = kwargs.get('callback', None)
         del kwargs['callback']
         cmd_line = CmdLine(cmd, *args, **kwargs)
@@ -368,36 +365,46 @@ class Client(object):
             if not self.connection.connected():
                 self.connection.connect()
 
-            if not self.connection.ready() and not self.subscribed:
+            if not self.connection.ready():
                 yield gen.Task(self.connection.wait_until_ready)
 
-            with self.connection as c:
-                command = self.format_command(cmd, *args, **kwargs)
-                try:
-                    yield gen.Task(self.connection.write, command)
-                except Exception, e:
-                    self.connection.disconnect()
-                    if not n_tries:
-                        raise e
-                    else:
-                        continue
+            if not self.subscribed and cmd not in ('AUTH', 'SELECT'):
+                if (self.password and
+                    self.connection.info.get('pass', None) != self.password):
+                    yield gen.Task(self.auth, self.password)
+                if (self.selected_db and
+                    self.connection.info.get('db', None) != self.selected_db):
+                    yield gen.Task(self.select, self.selected_db)
 
-                if ((cmd in PUB_SUB_COMMANDS) or
-                    (self.subscribed and cmd == 'PUBLISH')):
-                    result = True
-                    break
+            command = self.format_command(cmd, *args, **kwargs)
+            try:
+                yield gen.Task(self.connection.write, command)
+            except Exception, e:
+                self.connection.disconnect()
+                if not n_tries:
+                    raise e
                 else:
-                    result = None
-                    data = yield gen.Task(c.readline)
-                    if not data:
-                        if not n_tries:
-                            raise ConnectionError('no data received')
-                    else:
-                        resp = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_line)
-                        result = self.format_reply(cmd_line, resp)
-                        break
+                    continue
+
+            if ((cmd in PUB_SUB_COMMANDS) or
+                (self.subscribed and cmd == 'PUBLISH')):
+                result = True
+                break
+            else:
+                result = None
+                data = yield gen.Task(self.connection.readline)
+                if not data:
+                    if not n_tries:
+                        raise ConnectionError('no data received')
+                else:
+                    resp = yield gen.Task(self.process_data,
+                                          data,
+                                          cmd_line)
+                    result = self.format_reply(cmd_line, resp)
+                    break
+
+        if cmd not in ('AUTH', 'SELECT'):
+            self.connection.execute_pending_command()
 
         if callback:
             callback(result)
@@ -470,12 +477,32 @@ class Client(object):
     def ping(self, callback=None):
         self.execute_command('PING', callback=callback)
 
-    def info(self, callback=None):
-        self.execute_command('INFO', callback=callback)
+    def object(self, infotype, key, callback=None):
+        self.execute_command('OBJECT', infotype, key, callback=callback)
+
+    def info(self, section_name=None, callback=None):
+        args = ('INFO', )
+        if section_name:
+            args += (section_name, )
+        self.execute_command(*args, callback=callback)
+
+    def echo(self, value, callback=None):
+        self.execute_command('ECHO', value, callback=callback)
+
+    def time(self, callback=None):
+        """
+        Returns the server time as a 2-item tuple of ints:
+        (seconds since epoch, microseconds into this second).
+        """
+        self.execute_command('TIME', callback=callback)
 
     def select(self, db, callback=None):
         self.selected_db = db
-        self.execute_command('SELECT', db, callback=callback)
+        if self.connection.info.get('db', None) != db:
+            self.connection.info['db'] = db
+            self.execute_command('SELECT', db, callback=callback)
+        elif callback:
+            callback(True)
 
     def shutdown(self, callback=None):
         self.execute_command('SHUTDOWN', callback=callback)
@@ -489,18 +516,39 @@ class Client(object):
     def lastsave(self, callback=None):
         self.execute_command('LASTSAVE', callback=callback)
 
-    def keys(self, pattern, callback=None):
+    def keys(self, pattern='*', callback=None):
         self.execute_command('KEYS', pattern, callback=callback)
 
     def auth(self, password, callback=None):
-        self.execute_command('AUTH', password, callback=callback)
+        self.password = password
+        if self.connection.info.get('pass', None) != password:
+            self.connection.info['pass'] = password
+            self.execute_command('AUTH', password, callback=callback)
+        elif callback:
+            callback(True)
 
     ### BASIC KEY COMMANDS
     def append(self, key, value, callback=None):
         self.execute_command('APPEND', key, value, callback=callback)
 
+    def getrange(self, key, start, end, callback=None):
+        """
+        Returns the substring of the string value stored at ``key``,
+        determined by the offsets ``start`` and ``end`` (both are inclusive)
+        """
+        self.execute_command('GETRANGE', key, start, end, callback=callback)
+
     def expire(self, key, ttl, callback=None):
         self.execute_command('EXPIRE', key, ttl, callback=callback)
+
+    def expireat(self, key, when, callback=None):
+        """
+        Sets an expire flag on ``key``. ``when`` can be represented
+        as an integer indicating unix time or a Python datetime.datetime object.
+        """
+        if isinstance(when, datetime.datetime):
+            when = int(mod_time.mktime(when.timetuple()))
+        self.execute_command('EXPIREAT', key, when, callback=callback)
 
     def ttl(self, key, callback=None):
         self.execute_command('TTL', key, callback=callback)
@@ -520,6 +568,35 @@ class Client(object):
     def move(self, key, db, callback=None):
         self.execute_command('MOVE', key, db, callback=callback)
 
+    def persist(self, key, callback=None):
+        self.execute_command('PERSIST', key, callback=callback)
+
+    def pexpire(self, key, time, callback=None):
+        """
+        Set an expire flag on key ``key`` for ``time`` milliseconds.
+        ``time`` can be represented by an integer or a Python timedelta
+        object.
+        """
+        if isinstance(time, datetime.timedelta):
+            ms = int(time.microseconds / 1000)
+            time = time.seconds + time.days * 24 * 3600 * 1000 + ms
+        self.execute_command('PEXPIRE', key, time, callback=callback)
+
+    def pexpireat(self, key, when, callback=None):
+        """
+        Set an expire flag on key ``key``. ``when`` can be represented
+        as an integer representing unix time in milliseconds (unix time * 1000)
+        or a Python datetime.datetime object.
+        """
+        if isinstance(when, datetime.datetime):
+            ms = int(when.microsecond / 1000)
+            when = int(mod_time.mktime(when.timetuple())) * 1000 + ms
+        self.execute_command('PEXPIREAT', key, when, callback=callback)
+
+    def pttl(self, key, callback=None):
+        "Returns the number of milliseconds until the key will expire"
+        self.execute_command('PTTL', key, callback=callback)
+
     def substr(self, key, start, end, callback=None):
         self.execute_command('SUBSTR', key, start, end, callback=callback)
 
@@ -534,6 +611,12 @@ class Client(object):
 
     def setnx(self, key, value, callback=None):
         self.execute_command('SETNX', key, value, callback=callback)
+
+    def setrange(self, key, offset, value, callback=None):
+        self.execute_command('SETRANGE', key, offset, value, callback=callback)
+
+    def strlen(self, key, callback=None):
+        self.execute_command('STRLEN', key, callback=callback)
 
     def mset(self, mapping, callback=None):
         items = []
@@ -581,13 +664,26 @@ class Client(object):
         if store is not None:
             tokens.append('STORE')
             tokens.append(store)
-        return self.execute_command('SORT', *tokens, callback=callback)
+        self.execute_command('SORT', *tokens, callback=callback)
 
     def getbit(self, key, offset, callback=None):
         self.execute_command('GETBIT', key, offset, callback=callback)
 
     def setbit(self, key, offset, value, callback=None):
         self.execute_command('SETBIT', key, offset, value, callback=callback)
+
+    def bitcount(self, key, start=None, end=None, callback=None):
+        args = [a for a in (key, start, end) if a is not None]
+        kwargs = {'callback': callback}
+        self.execute_command('BITCOUNT', *args, **kwargs)
+
+    def bitop(self, operation, dest, *keys, **kwargs):
+        """
+        Perform a bitwise operation using ``operation`` between ``keys`` and
+        store the result in ``dest``.
+        """
+        kwargs = {'callback': kwargs.get('callback', None)}
+        self.execute_command('BITOP', operation, dest, *keys, **kwargs)
 
     ### COUNTERS COMMANDS
     def incr(self, key, callback=None):
@@ -598,6 +694,9 @@ class Client(object):
 
     def incrby(self, key, amount, callback=None):
         self.execute_command('INCRBY', key, amount, callback=callback)
+
+    def incrbyfloat(self, key, amount=1.0, callback=None):
+        self.execute_command('INCRBYFLOAT', key, amount, callback=callback)
 
     def decrby(self, key, amount, callback=None):
         self.execute_command('DECRBY', key, amount, callback=callback)
@@ -635,11 +734,25 @@ class Client(object):
     def ltrim(self, key, start, end, callback=None):
         self.execute_command('LTRIM', key, start, end, callback=callback)
 
-    def lpush(self, key, value, callback=None):
-        self.execute_command('LPUSH', key, value, callback=callback)
+    def lpush(self, key, *values, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('LPUSH', key, *values, callback=callback)
 
-    def rpush(self, key, value, callback=None):
-        self.execute_command('RPUSH', key, value, callback=callback)
+    def lpushx(self, key, value, callback=None):
+        self.execute_command('LPUSHX', key, value, callback=callback)
+
+    def linsert(self, key, where, refvalue, value, callback=None):
+        self.execute_command('LINSERT', key, where, refvalue, value,
+                             callback=callback)
+
+    def rpush(self, key, *values, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('RPUSH', key, *values, callback=callback)
+
+    def rpushx(self, key, value, **kwargs):
+        "Push ``value`` onto the tail of the list ``name`` if ``name`` exists"
+        callback = kwargs.get('callback', None)
+        self.execute_command('RPUSHX', key, value, callback=callback)
 
     def lpop(self, key, callback=None):
         self.execute_command('LPOP', key, callback=callback)
@@ -651,11 +764,13 @@ class Client(object):
         self.execute_command('RPOPLPUSH', src, dst, callback=callback)
 
     ### SET COMMANDS
-    def sadd(self, key, value, callback=None):
-        self.execute_command('SADD', key, value, callback=callback)
+    def sadd(self, key, *values, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('SADD', key, *values, callback=callback)
 
-    def srem(self, key, value, callback=None):
-        self.execute_command('SREM', key, value, callback=callback)
+    def srem(self, key, *values, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('SREM', key, *values, callback=callback)
 
     def scard(self, key, callback=None):
         self.execute_command('SCARD', key, callback=callback)
@@ -672,8 +787,11 @@ class Client(object):
     def smembers(self, key, callback=None):
         self.execute_command('SMEMBERS', key, callback=callback)
 
-    def srandmember(self, key, callback=None):
-        self.execute_command('SRANDMEMBER', key, callback=callback)
+    def srandmember(self, key, number=None, callback=None):
+        if number:
+            self.execute_command('SRANDMEMBER', key, number, callback=callback)
+        else:
+            self.execute_command('SRANDMEMBER', key, callback=callback)
 
     def sinter(self, keys, callback=None):
         self.execute_command('SINTER', *keys, callback=callback)
@@ -694,8 +812,9 @@ class Client(object):
         self.execute_command('SDIFFSTORE', dst, *keys, callback=callback)
 
     ### SORTED SET COMMANDS
-    def zadd(self, key, score, value, callback=None):
-        self.execute_command('ZADD', key, score, value, callback=callback)
+    def zadd(self, key, *score_value, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('ZADD', key, *score_value, callback=callback)
 
     def zcard(self, key, callback=None):
         self.execute_command('ZCARD', key, callback=callback)
@@ -709,24 +828,17 @@ class Client(object):
     def zrevrank(self, key, value, callback=None):
         self.execute_command('ZREVRANK', key, value, callback=callback)
 
-    def zrem(self, key, value, callback=None):
-        self.execute_command('ZREM', key, value, callback=callback)
+    def zrem(self, key, *values, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('ZREM', key, *values, callback=callback)
 
-    def zcount(self, key, start, end, offset=None, limit=None,
-               with_scores=None, callback=None):
-        tokens = [key, start, end]
-        if offset is not None:
-            tokens.append('LIMIT')
-            tokens.append(offset)
-            tokens.append(limit)
-        if with_scores:
-            tokens.append('WITHSCORES')
-        self.execute_command('ZCOUNT', *tokens, callback=callback)
+    def zcount(self, key, start, end, callback=None):
+        self.execute_command('ZCOUNT', key, start, end, callback=callback)
 
     def zscore(self, key, value, callback=None):
         self.execute_command('ZSCORE', key, value, callback=callback)
 
-    def zrange(self, key, start, num, with_scores, callback=None):
+    def zrange(self, key, start, num, with_scores=True, callback=None):
         tokens = [key, start, num]
         if with_scores:
             tokens.append('WITHSCORES')
@@ -789,7 +901,7 @@ class Client(object):
         if aggregate:
             tokens.append('AGGREGATE')
             tokens.append(aggregate)
-        return self.execute_command(command, *tokens, callback=callback)
+        self.execute_command(command, *tokens, callback=callback)
 
     ### HASH COMMANDS
     def hgetall(self, key, callback=None):
@@ -803,11 +915,15 @@ class Client(object):
     def hset(self, key, field, value, callback=None):
         self.execute_command('HSET', key, field, value, callback=callback)
 
+    def hsetnx(self, key, field, value, callback=None):
+        self.execute_command('HSETNX', key, field, value, callback=callback)
+
     def hget(self, key, field, callback=None):
         self.execute_command('HGET', key, field, callback=callback)
 
-    def hdel(self, key, field, callback=None):
-        self.execute_command('HDEL', key, field, callback=callback)
+    def hdel(self, key, *fields, **kwargs):
+        callback = kwargs.get('callback')
+        self.execute_command('HDEL', key, *fields, callback=callback)
 
     def hlen(self, key, callback=None):
         self.execute_command('HLEN', key, callback=callback)
@@ -817,6 +933,10 @@ class Client(object):
 
     def hincrby(self, key, field, amount=1, callback=None):
         self.execute_command('HINCRBY', key, field, amount, callback=callback)
+
+    def hincrbyfloat(self, key, field, amount=1.0, callback=None):
+        self.execute_command('HINCRBYFLOAT', key, field, amount,
+                             callback=callback)
 
     def hkeys(self, key, callback=None):
         self.execute_command('HKEYS', key, callback=callback)
@@ -877,28 +997,29 @@ class Client(object):
                     return e
 
             cmd_listen = CmdLine('LISTEN')
-            with self.connection as c:
-                while self.subscribed:
-                    data = yield gen.Task(c.readline)
-                    if isinstance(data, Exception):
-                        raise data
+            while self.subscribed:
+                data = yield gen.Task(self.connection.readline)
+                if isinstance(data, Exception):
+                    raise data
 
-                    response = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_listen)
-                    if isinstance(response, Exception):
-                        raise response
+                # TODO: Handle disconnects (data will be None)
+                response = yield gen.Task(self.process_data,
+                                          data,
+                                          cmd_listen)
+                if isinstance(response, Exception):
+                    raise response
 
-                    result = self.format_reply(cmd_listen, response)
+                result = self.format_reply(cmd_listen, response)
 
-                    callback(result)
-                    if result.kind in ['unsubscribe', 'punsubscribe'] \
-                    and result.body == 0:
-                        self.on_unsubscribed()
+                callback(result)
+                if result.kind in ['unsubscribe', 'punsubscribe'] \
+                and result.body == 0:
+                    self.on_unsubscribed()
 
     ### CAS
-    def watch(self, key, callback=None):
-        self.execute_command('WATCH', key, callback=callback)
+    def watch(self, *key_names, **kwargs):
+        callback = kwargs.get('callback', None)
+        self.execute_command('WATCH', *key_names, callback=callback)
 
     def unwatch(self, callback=None):
         self.execute_command('UNWATCH', callback=callback)
@@ -911,7 +1032,8 @@ class Client(object):
             args = []
         num_keys = len(keys)
         keys.extend(args)
-        self.execute_command('EVAL', script, num_keys, *keys, callback=callback)
+        self.execute_command('EVAL', script, num_keys,
+                             *keys, callback=callback)
 
     def evalsha(self, shahash, keys=None, args=None, callback=None):
         if keys is None:
@@ -920,7 +1042,8 @@ class Client(object):
             args = []
         num_keys = len(keys)
         keys.extend(args)
-        self.execute_command('EVALSHA', shahash, num_keys, *keys, callback=callback)
+        self.execute_command('EVALSHA', shahash, num_keys,
+                             *keys, callback=callback)
 
     def script_exists(self, shahashes, callback=None):
         # not yet implemented in the redis protocol
@@ -983,6 +1106,13 @@ class Pipeline(Client):
 
         request = self.format_pipeline_request(command_stack)
 
+        if (self.password and
+            self.connection.info.get('pass', None) != self.password):
+            yield gen.Task(self.auth, self.password)
+        if (self.selected_db and
+            self.connection.info.get('db', None) != self.selected_db):
+            r = yield gen.Task(self.select, self.selected_db)
+
         if not self.connection.ready():
             yield gen.Task(self.connection.wait_until_ready)
 
@@ -1001,24 +1131,23 @@ class Pipeline(Client):
         total = len(command_stack)
         cmds = iter(command_stack)
 
-        with self.connection:
-            while len(responses) < total:
-                data = yield gen.Task(self.connection.readline)
-                if not data:
-                    raise ResponseError('Not enough data after EXEC')
-                try:
-                    cmd_line = cmds.next()
-                    if self.transactional and cmd_line.cmd != 'EXEC':
-                        response = yield gen.Task(self.process_data,
-                                                  data,
-                                                  CmdLine('MULTI_PART'))
-                    else:
-                        response = yield gen.Task(self.process_data,
-                                                  data,
-                                                  cmd_line)
-                    responses.append(response)
-                except Exception, e:
-                    responses.append(e)
+        while len(responses) < total:
+            data = yield gen.Task(self.connection.readline)
+            if not data:
+                raise ResponseError('Not enough data after EXEC')
+            try:
+                cmd_line = cmds.next()
+                if self.transactional and cmd_line.cmd != 'EXEC':
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              CmdLine('MULTI_PART'))
+                else:
+                    response = yield gen.Task(self.process_data,
+                                              data,
+                                              cmd_line)
+                responses.append(response)
+            except Exception, e:
+                responses.append(e)
 
         if self.transactional:
             command_stack = command_stack[:-1]
@@ -1026,5 +1155,7 @@ class Pipeline(Client):
             results = self.format_replies(command_stack[1:], responses)
         else:
             results = self.format_replies(command_stack, responses)
+
+        self.connection.execute_pending_command()
 
         callback(results)

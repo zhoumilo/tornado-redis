@@ -50,3 +50,41 @@ class MiscTestCase(RedisTestCase):
         yield gen.Task(some_code)
 
         self.stop()
+
+    @async_test
+    @gen.engine
+    def test_with(self):
+        '''
+        Find a way to destroy client instances created by
+        tornado.gen-wrapped functions.
+        '''
+        @gen.engine
+        def some_code(callback=None):
+            with self._new_client(on_destroy=callback) as c:
+                n = '%d' % random.randint(1, 1000)
+                yield gen.Task(c.set, 'foo', n)
+                n2 = yield gen.Task(c.get, 'foo')
+                self.assertEqual(n, n2)
+
+        yield gen.Task(some_code)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_for(self):
+        '''
+        Find a way to destroy client instances created by
+        tornado.gen-wrapped functions.
+        '''
+        @gen.engine
+        def some_code(callback=None):
+            c = self._new_client(on_destroy=callback)
+            for n in xrange(1, 5):
+                yield gen.Task(c.set, 'foo', n)
+                n2 = yield gen.Task(c.get, 'foo')
+                self.assertEqual('%d' % n, n2)
+
+        yield gen.Task(some_code)
+
+        self.stop()
