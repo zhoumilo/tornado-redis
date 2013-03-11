@@ -52,6 +52,7 @@ class DisconnectTestCase(AsyncTestCase):
         super(DisconnectTestCase, self).setUp()
         self._server = DisconnectingRedisServer(io_loop=self.io_loop)
         self._server.listen(self.test_port)
+        self.server_running = True
         self.client = self._new_client()
         self.client.flushdb()
 
@@ -69,7 +70,8 @@ class DisconnectTestCase(AsyncTestCase):
             del self.client
         except AttributeError:
             pass
-        self._server.stop()
+        if self.server_running:
+            self._server.stop()
         super(DisconnectTestCase, self).tearDown()
 
     def test_disconnect(self):
@@ -78,6 +80,7 @@ class DisconnectTestCase(AsyncTestCase):
             self.wait()
             self._server.disconnect()
             self._server.stop()
+            self.server_running = False
             self.client.set('foo', 'bar', callback=self.stop)
             self.wait()
         self.assertRaises(ConnectionError, _disconnect_and_send_a_command)
