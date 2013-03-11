@@ -60,6 +60,7 @@ class Connection(object):
                 sock.connect((self.host, self.port))
                 self._stream = IOStream(sock, io_loop=self._io_loop)
                 self._stream.set_close_callback(self.on_stream_close)
+                self.info['db'] = 0
             except socket.error, e:
                 raise ConnectionError(str(e))
             self.fire_event('on_connect')
