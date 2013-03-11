@@ -155,7 +155,7 @@ but seem to be not maintained any more.
 
 [nizox](https://github.com/nizox)
 
-[Lessandro Mariano](Lessandro Mariano)
+[Lessandro Mariano](https://hithub.com/lessandro)
 
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
 are maintained by [Vlad Glushchuk](https://github.com/leporo).
