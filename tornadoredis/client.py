@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+from collections import namedtuple
 from functools import partial
 from itertools import izip
 import logging
@@ -16,21 +16,7 @@ from .connection import Connection
 log = logging.getLogger('tornadoredis.client')
 
 
-class Message(object):
-    ''' Wrapper Message object.
-        kind = command
-       channel = channel from which the message was received
-        pattern = subscription pattern
-        body = message body
-    '''
-    def __init__(self, *args):
-        if len(args) == 3:
-            (self.kind, self.channel, self.body) = args
-            self.pattern = self.channel
-        elif len(args) == 4:
-            (self.kind, self.pattern, self.channel, self.body) = args
-        else:
-            raise ValueError('Invalid number of arguments')
+Message = namedtuple('Message', ('kind', 'channel', 'body', 'pattern'))
 
 
 class CmdLine(object):
@@ -89,7 +75,20 @@ def reply_datetime(r, *args, **kwargs):
 
 
 def reply_pubsub_message(r, *args, **kwargs):
-    return Message(*r)
+    '''
+    Handles a Pub/Sub message and packs its data into a Message object.
+    '''
+    if len(r) == 3:
+        (kind, channel, body) = r
+        pattern = channel
+    elif len(r) == 4:
+        (kind, pattern, channel, body) = r
+    elif len(r) == 1:
+        kind = r[0]
+        channel = body = pattern = None
+    else:
+        raise ValueError('Invalid number of arguments')
+    return Message(kind, channel, body, pattern)
 
 
 def reply_zset(r, *args, **kwargs):
@@ -989,6 +988,7 @@ class Client(object):
 
     @gen.engine
     def listen(self, callback=None):
+
         if callback:
             def error_wrapper(e):
                 if isinstance(e, GeneratorExit):
@@ -1002,7 +1002,10 @@ class Client(object):
                 if isinstance(data, Exception):
                     raise data
 
-                # TODO: Handle disconnects (data will be None)
+                if data is None:
+                    callback(reply_pubsub_message(('disconnect', )))
+                    return
+
                 response = yield gen.Task(self.process_data,
                                           data,
                                           cmd_listen)

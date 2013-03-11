@@ -9,6 +9,7 @@ from tornado.testing import AsyncTestCase
 
 import tornadoredis
 from tornadoredis.exceptions import ConnectionError
+from tornadoredis.tests.redistest import async_test
 
 
 class DisconnectingRedisServer(TCPServer):
@@ -60,14 +61,6 @@ class DisconnectTestCase(AsyncTestCase):
         self.client = self._new_client()
         self.client.flushdb()
 
-    def _new_client(self):
-        client = tornadoredis.Client(io_loop=self.io_loop,
-                                     port=self.test_port,
-                                     selected_db=self.test_db)
-        # client.connection.connect()
-        # client.select(self.test_db)
-        return client
-
     def tearDown(self):
         try:
             self.client.connection.disconnect()
@@ -77,6 +70,14 @@ class DisconnectTestCase(AsyncTestCase):
         if self.server_running:
             self._server.stop()
         super(DisconnectTestCase, self).tearDown()
+
+    def _new_client(self):
+        client = tornadoredis.Client(io_loop=self.io_loop,
+                                     port=self.test_port,
+                                     selected_db=self.test_db)
+        # client.connection.connect()
+        # client.select(self.test_db)
+        return client
 
     def test_disconnect(self):
         def _disconnect_and_send_a_command():
@@ -135,3 +136,20 @@ class DisconnectTestCase(AsyncTestCase):
 
         # check selected db
         self.assertEquals(self.test_db, self._server.selected_db)
+
+    @async_test
+    @gen.engine
+    def test_disconnect_when_subscribed(self):
+        cb_disconnect = (yield gen.Callback('disconnect'))
+
+        def handle_message(msg):
+            if msg.kind == 'disconnect':
+                cb_disconnect(True)
+
+        yield gen.Task(self.client.subscribe, 'foo')
+        self._server.disconnect()
+        self.client.listen(handle_message)
+        res = yield gen.Wait('disconnect')
+        self.assertTrue(res)
+
+        self.stop()
