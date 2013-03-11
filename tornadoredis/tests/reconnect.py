@@ -1,3 +1,4 @@
+import time
 import socket
 from functools import partial
 
@@ -85,6 +86,10 @@ class DisconnectTestCase(AsyncTestCase):
             self.wait()
         self.assertRaises(ConnectionError, _disconnect_and_send_a_command)
 
+    def _sleep(self):
+        self.io_loop.add_timeout(time.time() + 0.1, self.stop)
+        self.wait()
+
     def test_reconnect(self):
         def _test_send():
             self.client.set('foo', 'bar', callback=self.stop)
@@ -92,5 +97,5 @@ class DisconnectTestCase(AsyncTestCase):
 
         _test_send()
         self._server.disconnect()
+        self._sleep()
         _test_send()
-        self.stop()
