@@ -39,11 +39,20 @@ class MessagesCatcher(tornado.websocket.WebSocketHandler):
     def on_message(self, msg):
         if msg.kind == 'message':
             self.write_message(str(msg.body))
+        if msg.kind == 'disconnect':
+            # Do not forget to restart a listen loop
+            # after a successful reconnect attempt.
 
-    def close(self):
-        print 'closed'
-        self.client.unsubscribe('test_channel')
-        self.client.disconnect()
+            # Do not try to reconnect, just send a message back
+            # to the client and close the client connection
+            self.write_message('The connection terminated '
+                               'due to a Redis server error.')
+            self.close()
+
+    def on_close(self):
+        if self.client.subscribed:
+            self.client.unsubscribe('test_channel')
+            self.client.disconnect()
 
 
 application = tornado.web.Application([

@@ -988,7 +988,26 @@ class Client(object):
 
     @gen.engine
     def listen(self, callback=None):
+        """
+        Starts a Pub/Sub channel listening loop.
+        Use the unsubscribe or punsubscribe methods to exit it.
 
+        Each received message triggers the callback function.
+
+        Callback function receives a Message object instance as argument.
+
+        Here is an example of handling a channel subscription::
+
+            def handle_message(msg):
+                if msg.kind == 'message':
+                    print msg.body
+                elif msg.kind == 'disconnect':
+                    # Disconnected from the redis server
+                    pass
+
+            yield client.subscribe('channel_name')
+            client.listen(handle_message)
+        """
         if callback:
             def error_wrapper(e):
                 if isinstance(e, GeneratorExit):
@@ -1003,6 +1022,9 @@ class Client(object):
                     raise data
 
                 if data is None:
+                    # Disconnected from a server
+                    self.subscribed = False
+                    # Notify a calling
                     callback(reply_pubsub_message(('disconnect', )))
                     return
 
