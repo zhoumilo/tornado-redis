@@ -24,11 +24,12 @@ class DisconnectingRedisServer(TCPServer):
 
     @gen.engine
     def handle_stream(self, stream, address):
+        self.selected_db = 0
         self._stream = stream
         n_args = yield gen.Task(stream.read_until, '\r\n')
         while n_args and n_args[0] == '*':
             yield gen.Task(stream.read_until, '\r\n')
-            yield gen.Task(stream.read_until, '\r\n')
+            command = yield gen.Task(stream.read_until, '\r\n')
             # Read command arguments
             arg_num = int(n_args.strip()[1:]) - 1
             if arg_num > 0:
@@ -36,7 +37,9 @@ class DisconnectingRedisServer(TCPServer):
                     # read the $N line
                     yield gen.Task(stream.read_until, '\r\n')
                     # read the argument line
-                    yield gen.Task(stream.read_until, '\r\n')
+                    arg = yield gen.Task(stream.read_until, '\r\n')
+                    if command == 'SELECT\r\n':
+                        self.selected_db = int(arg.strip())
             stream.write('+OK\r\n')
             # Read the next command
             n_args = yield gen.Task(stream.read_until, '\r\n')
@@ -99,3 +102,36 @@ class DisconnectTestCase(AsyncTestCase):
         self._server.disconnect()
         self._sleep()
         _test_send()
+
+    def test_reconnect_db(self):
+        # let select/flushdb happen
+        self._sleep()
+
+        # check selected db
+        self.assertEquals(self.test_db, self._server.selected_db)
+
+        # stop server
+        self._server.disconnect()
+        self._server.stop()
+        self.server_running = False
+        self._sleep()
+
+        # let a command fail
+        try:
+            self.client.set('foo', 'bar', callback=self.stop)
+            self.wait()
+        except ConnectionError:
+            pass
+
+        # restart server
+        self._server = DisconnectingRedisServer(io_loop=self.io_loop)
+        self._server.listen(self.test_port)
+        self.server_running = True
+        self._sleep()
+
+        # reissue command
+        self.client.set('foo', 'bar', callback=self.stop)
+        self.wait()
+
+        # check selected db
+        self.assertEquals(self.test_db, self._server.selected_db)
