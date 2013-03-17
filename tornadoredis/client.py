@@ -1138,6 +1138,9 @@ class Pipeline(Client):
             self.connection.info.get('db', None) != self.selected_db):
             r = yield gen.Task(self.select, self.selected_db)
 
+        if not self.connection.connected():
+            self.connection.connect()
+
         if not self.connection.ready():
             yield gen.Task(self.connection.wait_until_ready)
 
