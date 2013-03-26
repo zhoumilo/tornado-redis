@@ -66,8 +66,14 @@ def reply_int(r, *args, **kwargs):
     return int(r) if r is not None else None
 
 
-def reply_float(r, *args, **kwargs):
-    return float(r) if r is not None else None
+def reply_number(r, *args, **kwargs):
+    if r is not None:
+        num = float(r)
+        if not num.is_integer():
+            return num
+        else:
+            return int(num)
+    return None
 
 
 def reply_datetime(r, *args, **kwargs):
@@ -94,7 +100,7 @@ def reply_pubsub_message(r, *args, **kwargs):
 def reply_zset(r, *args, **kwargs):
     if (not r) or (not 'WITHSCORES' in args):
         return r
-    return zip(r[::2], map(float, r[1::2]))
+    return zip(r[::2], map(reply_number, r[1::2]))
 
 
 def reply_hmget(r, key, *fields, **kwargs):
@@ -172,11 +178,13 @@ REPLY_MAP = dict_merge(
                         reply_pubsub_message),
     string_keys_to_dict('ZRANK ZREVRANK',
                         reply_int),
-    string_keys_to_dict('ZSCORE ZINCRBY ZCOUNT ZCARD',
+    string_keys_to_dict('ZCOUNT ZCARD',
                         reply_int),
     string_keys_to_dict('ZRANGE ZRANGEBYSCORE ZREVRANGE '
                         'ZREVRANGEBYSCORE',
                         reply_zset),
+    string_keys_to_dict('ZSCORE ZINCRBY',
+                        reply_number),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),
      'LASTSAVE': reply_datetime,
