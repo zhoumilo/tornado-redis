@@ -33,6 +33,7 @@ application = tornado.web.Application([
 @tornado.gen.engine
 def create_test_data():
     c = tornadoredis.Client()
+    c.connect()
     with c.pipeline() as pipe:
         pipe.set('foo', 'Lorem ipsum #1', 12 * 60 * 60)
         pipe.set('bar', 'Lorem ipsum #2', 12 * 60 * 60)
