@@ -15,4 +15,5 @@ setup(name='tornado-redis',
       license="http://www.apache.org/licenses/LICENSE-2.0",
       url='http://github.com/leporo/tornado-redis',
       keywords=['Redis', 'Tornado'],
-      packages=['tornadoredis'], )
+      packages=['tornadoredis'],
+      use_2to3=True, )
