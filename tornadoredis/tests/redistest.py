@@ -59,10 +59,10 @@ class RedisTestCase(AsyncTestCase):
             pass
         super(RedisTestCase, self).tearDown()
 
-    def _new_client(self, pool=None, on_destroy=None):
+    def _new_client(self, pool=None, on_destroy=None, selected_db=None):
         client = TestRedisClient(io_loop=self.io_loop,
                                  port=self.test_port,
-                                 selected_db=self.test_db,
+                                 selected_db=selected_db or self.test_db,
                                  connection_pool=pool,
                                  on_destroy=on_destroy)
 

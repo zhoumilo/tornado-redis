@@ -92,6 +92,27 @@ class ConnectionPoolTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_connection_pool_pipeline(self):
+        pool = self._new_pool()
+        c1 = self._new_client(pool)
+        v1 = '%d' % randint(1, 1000)
+        v2 = '%d' % randint(1, 1000)
+        p = c1.pipeline()
+        p.set('foo1', v1)
+        p.set('foo2', v2)
+        yield gen.Task(p.execute)
+        yield gen.Task(c1.disconnect)
+        c2 = self._new_client(pool)
+        p = c2.pipeline()
+        p.get('foo1', v1)
+        p.get('foo2', v2)
+        v1_saved, v2_saved = yield gen.Task(p.execute)
+        self.assertEqual(v1, v1_saved)
+        self.assertEqual(v2, v2_saved)
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_for_memory_leaks(self):
         @gen.engine
         def some_code(pool, on_client_destroy=None, callback=None):
