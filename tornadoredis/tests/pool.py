@@ -139,16 +139,14 @@ class ConnectionPoolTestCase(RedisTestCase):
         foo_9 = randint(1, 1000)
         foo_10 = randint(1, 1000)
 
-        pool = self._new_pool(max_connections=1, wait_for_available=True)
-        c9 = self._new_client(pool=pool)
+        pool = self._new_pool(max_connections=1,
+                              wait_for_available=True)
+        c9 = self._new_client(pool=pool, selected_db=9)
         yield gen.Task(c9.set, 'foo', foo_9)
         c9.disconnect()
 
-        test_db = self.test_db
-        self.test_db = 10
-        c10 = self._new_client(pool=pool)
+        c10 = self._new_client(pool=pool, selected_db=10)
         yield gen.Task(c10.set, 'foo', foo_10)
-        self.test_db = test_db
 
         # Check the values
         c = self._new_client()
@@ -158,5 +156,54 @@ class ConnectionPoolTestCase(RedisTestCase):
         yield gen.Task(c.select, 9)
         res = yield gen.Task(c.get, 'foo')
         self.assertEqual(res, '%d' % foo_9)
+
+        self.stop()
+
+
+    @async_test
+    @gen.engine
+    def test_select_db_and_pipeline(self):
+        foo_9 = '%d' % randint(1, 1000)
+        foo_10 = '%d' % randint(1, 1000)
+
+        c = self._new_client(selected_db=9)
+        yield gen.Task(c.set, 'foo', foo_9)
+        yield gen.Task(c.select, 10)
+        yield gen.Task(c.set, 'foo', foo_10)
+
+        n10 = yield gen.Task(c.get , 'foo')
+        self.assertTrue(n10, foo_10)
+        yield gen.Task(c.select, 9)
+        n9 = yield gen.Task(c.get, 'foo')
+        self.assertEqual(n9, foo_9)
+
+        # Check the values using a connection pool and pipelines
+        self.pool = self._new_pool(max_connections=1,
+                                   wait_for_available=True)
+
+        c = self._new_client(pool=self.pool, selected_db=9)
+        pipe = c.pipeline()
+        pipe.get('foo')
+        res = yield gen.Task(pipe.execute)
+        self.assertTrue(res)
+        res = res[0]
+        self.assertEqual(res, foo_9)
+
+        # c = self._new_client(pool=pool, selected_db=10)
+        # pipe = c.pipeline()
+        # pipe.get('foo')
+        # res = yield gen.Task(pipe.execute)
+        # self.assertTrue(res)
+        # res = res[0]
+        # self.assertEqual(res, foo_10)
+        # c.disconnect()
+
+        c = self._new_client(pool=self.pool, selected_db=9)
+        pipe = c.pipeline()
+        pipe.get('foo')
+        res = yield gen.Task(pipe.execute)
+        self.assertTrue(res)
+        res = res[0]
+        self.assertEqual(res, foo_9)
 
         self.stop()

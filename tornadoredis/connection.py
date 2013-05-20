@@ -23,7 +23,7 @@ class Connection(object):
         self._io_loop = io_loop
 
         self.in_progress = False
-        self.read_callbacks = []
+        self.read_callbacks = set()
         self.ready_callbacks = deque()
         self._lock = 0
         self.info = {'db': 0, 'pass': None}
@@ -76,9 +76,9 @@ class Connection(object):
         if self._stream:
             self._stream = None
             callbacks = self.read_callbacks
-            self.read_callbacks = []
+            self.read_callbacks = set()
             for callback in callbacks:
-                callback(None)
+                callback()
 
     def disconnect(self):
         if self._stream:
@@ -105,7 +105,7 @@ class Connection(object):
 
         if callback:
             _callback = lambda: callback(None)
-            self.read_callbacks.append(_callback)
+            self.read_callbacks.add(_callback)
             cb = partial(self.read_callback, _callback)
         else:
             cb = None
@@ -121,7 +121,7 @@ class Connection(object):
                 self.disconnect()
                 raise ConnectionError('Tried to read from '
                                       'non-existent connection')
-            self.read_callbacks.append(callback)
+            self.read_callbacks.add(callback)
             self._stream.read_bytes(length,
                                     callback=partial(self.read_callback,
                                                      callback))
@@ -129,7 +129,10 @@ class Connection(object):
             self.fire_event('on_disconnect')
 
     def read_callback(self, callback, *args, **kwargs):
-        self.read_callbacks.remove(callback)
+        try:
+            self.read_callbacks.remove(callback)
+        except KeyError:
+            pass
         callback(*args, **kwargs)
 
     def readline(self, callback=None):
@@ -138,7 +141,7 @@ class Connection(object):
                 self.disconnect()
                 raise ConnectionError('Tried to read from '
                                       'non-existent connection')
-            self.read_callbacks.append(callback)
+            self.read_callbacks.add(callback)
             self._stream.read_until('\r\n',
                                     callback=partial(self.read_callback,
                                                      callback))
@@ -152,7 +155,7 @@ class Connection(object):
 
 
 class ConnectionPool(object):
-    '''
+    """
     'A Redis server connection pool.
 
     Arguments:
@@ -162,22 +165,24 @@ class ConnectionPool(object):
                              available connection if a connection limit
                              has been reached.
         **connection_kwargs
-    '''
+    """
     def __init__(self, max_connections=None, wait_for_available=False,
                  **connection_kwargs):
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections or 2048
         self.wait_for_avaliable = wait_for_available
         self._created_connections = 0
-        self._available_connections = deque()
+        self._available_connections = set()
         self._in_use_connections = set()
-        self._waiting_clients = deque()
+        self._waiting_clients = set()
 
     def get_connection(self, event_handler_proxy=None):
-        "Get a connection from the pool"
+        """
+        Returns a pooled Redis server connection
+        """
         try:
-            connection = self._available_connections.popleft()
-        except IndexError:
+            connection = self._available_connections.pop()
+        except KeyError:
             connection = self.make_connection()
         if connection:
             connection._event_handler = event_handler_proxy
@@ -189,56 +194,65 @@ class ConnectionPool(object):
         return connection
 
     def make_proxy(self, client_proxy=None, connected=True):
+        """
+        Creates a proxy object to substitute client's connection
+        until a connection be available
+        """
         connection = ConnectionProxy(pool=self,
                                      client_proxy=client_proxy,
                                      connected=connected)
         if connected:
-            self._waiting_clients.append(connection)
+            self._waiting_clients.add(connection)
         return connection
 
     def make_connection(self):
-        "Create a new connection"
+        """
+        Creates a new connection to Redis server
+        """
         if self._created_connections >= self.max_connections:
             return None
         self._created_connections += 1
         return Connection(**self.connection_kwargs)
 
     def release(self, connection):
-        "Releases the connection back to the pool"
+        """
+        Releases the connection back to the pool
+        """
         if isinstance(connection, ConnectionProxy):
             try:
                 self._waiting_clients.remove(connection)
-            except ValueError:
+            except KeyError:
                 pass
             return
         connection._event_handler = None
         if self._waiting_clients:
-            waiting = self._waiting_clients.popleft()
+            waiting = self._waiting_clients.pop()
             waiting.assign_connection(connection)
         else:
             try:
                 self._in_use_connections.remove(connection)
             except (KeyError, ValueError):
                 pass
-            self._available_connections.append(connection)
+            self._available_connections.add(connection)
 
     def reconnect(self, connection_proxy):
         if self._available_connections:
-            connection = self._available_connections.popleft()
+            connection = self._available_connections.pop()
             connection_proxy.assign_connection(connection)
         else:
-            self._waiting_clients.append(connection_proxy)
+            self._waiting_clients.add(connection_proxy)
 
 
 class ConnectionProxy(object):
-    '''
+    """
     A stub object to replace a client's connection until one is available.
-    '''
+    """
     def __init__(self, pool=None, client_proxy=None, connected=True):
         self.client = client_proxy
         self.pool = weakref.proxy(pool)
         self.ready_callbacks = []
         self._connected = connected
+        self.info = {'db': -1}
 
     def connected(self):
         return self._connected
@@ -261,9 +275,9 @@ class ConnectionProxy(object):
         pass
 
     def assign_connection(self, connection):
-        '''
-        Replace this pending connection with the real one.
-        '''
+        """
+        Replaces given connection proxy with the connection object.
+        """
         if self.ready_callbacks:
             connection.ready_callbacks += self.ready_callbacks
             self.ready_callbacks = []

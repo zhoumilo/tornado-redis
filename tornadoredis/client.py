@@ -1,6 +1,7 @@
-from collections import namedtuple
+# -*- coding: utf-8 -*-
 from functools import partial
 from itertools import izip
+from collections import namedtuple
 import logging
 import weakref
 import datetime
@@ -261,8 +262,8 @@ class Client(object):
         return a
 
     def pipeline(self, transactional=False):
-        '''
-        Creates the 'Pipeline' to pack multiple redis commands
+        """
+        Creates the 'Pipeline' to send multiple redis commands
         in a single request.
 
         Usage:
@@ -279,7 +280,7 @@ class Client(object):
                 pipe.expire('foo', 60)
 
                 yield gen.Task(pipe.execute)
-        '''
+        """
         if not self._pipeline:
             self._pipeline = Pipeline(
                 transactional=transactional,
@@ -308,9 +309,9 @@ class Client(object):
 
     @gen.engine
     def disconnect(self, callback=None):
-        '''
+        """
         Disconnects from the Redis server.
-        '''
+        """
         connection = self.connection
         if connection:
             pool = self._connection_pool
@@ -406,9 +407,9 @@ class Client(object):
                     if not n_tries:
                         raise ConnectionError('no data received')
                 else:
-                    resp = yield gen.Task(self.process_data,
-                                          data,
-                                          cmd_line)
+                    resp = self.process_data(data, cmd_line)
+                    if isinstance(resp, partial):
+                        resp = yield gen.Task(resp)
                     result = self.format_reply(cmd_line, resp)
                     break
 
@@ -419,7 +420,17 @@ class Client(object):
             callback(result)
 
     @gen.engine
-    def process_data(self, data, cmd_line, callback=None):
+    def _consume_bulk(self, tail, callback=None):
+        response = yield gen.Task(self.connection.read, int(tail) + 2)
+        if isinstance(response, Exception):
+            raise response
+        if not response:
+            raise ResponseError('EmptyResponse')
+        else:
+            response = response[:-2]
+        callback(response)
+
+    def process_data(self, data, cmd_line):
         data = data[:-2]  # strip \r\n
 
         if data == '$-1':
@@ -430,18 +441,9 @@ class Client(object):
             head, tail = data[0], data[1:]
 
             if head == '*':
-                response = yield gen.Task(self.consume_multibulk,
-                                          int(tail),
-                                          cmd_line)
+                return partial(self.consume_multibulk, int(tail), cmd_line)
             elif head == '$':
-                # Consume bulk reply
-                response = yield gen.Task(self.connection.read, int(tail) + 2)
-                if isinstance(response, Exception):
-                    raise response
-                if not response:
-                    raise ResponseError('EmptyResponse')
-                else:
-                    response = response[:-2]
+                return partial(self._consume_bulk, tail)
             elif head == '+':
                 response = tail
             elif head == ':':
@@ -453,7 +455,7 @@ class Client(object):
             else:
                 raise ResponseError('Unknown response type %s' % head,
                                     cmd_line)
-        callback(response)
+        return response
 
     @gen.engine
     def consume_multibulk(self, length, cmd_line, callback=None):
@@ -465,7 +467,9 @@ class Client(object):
                     'Not enough data in response to %s, accumulated tokens: %s'
                     % (cmd_line, tokens),
                     cmd_line)
-            token = yield gen.Task(self.process_data, data, cmd_line)
+            token = self.process_data(data, cmd_line)
+            if isinstance(token, partial):
+                token = yield gen.Task(token)
             tokens.append(token)
 
         callback(tokens)
@@ -629,7 +633,8 @@ class Client(object):
 
     def mset(self, mapping, callback=None):
         items = []
-        [items.extend(pair) for pair in mapping.iteritems()]
+        for pair in mapping.iteritems():
+            items.extend(pair)
         self.execute_command('MSET', *items, callback=callback)
 
     def msetnx(self, mapping, callback=None):
@@ -1038,9 +1043,9 @@ class Client(object):
                     callback(reply_pubsub_message(('disconnect', )))
                     return
 
-                response = yield gen.Task(self.process_data,
-                                          data,
-                                          cmd_listen)
+                response = self.process_data(data, cmd_listen)
+                if isinstance(response, partial):
+                    response = yield gen.Task(response)
                 if isinstance(response, Exception):
                     raise response
 
@@ -1103,14 +1108,24 @@ class Pipeline(Client):
         super(Pipeline, self).__init__(*args, **kwargs)
         self.transactional = transactional
         self.command_stack = []
+        self.executing = False
+
+    def __del__(self):
+        """
+        Do not disconnect on releasing the PipeLine object.
+        Thanks to Tomek (https://github.com/thlawiczka)
+        """
+        pass
 
     def execute_command(self, cmd, *args, **kwargs):
-        if cmd in ('AUTH', 'SELECT'):
+        if self.executing and cmd in ('AUTH', 'SELECT'):
             super(Pipeline, self).execute_command(cmd, *args, **kwargs)
         elif cmd in PUB_SUB_COMMANDS:
             raise RequestError(
-                'Client is not supposed to issue command %s in pipeline' % cmd)
-        self.command_stack.append(CmdLine(cmd, *args, **kwargs))
+                'Client is not supposed to issue '
+                'the %s command in a pipeline' % cmd)
+        else:
+            self.command_stack.append(CmdLine(cmd, *args, **kwargs))
 
     def discard(self):
         # actually do nothing with redis-server, just flush the command_stack
@@ -1133,67 +1148,73 @@ class Pipeline(Client):
     def execute(self, callback=None):
         command_stack = self.command_stack
         self.command_stack = []
-
-        if self.transactional:
-            command_stack = [CmdLine('MULTI')] \
-                          + command_stack \
-                          + [CmdLine('EXEC')]
-
-        request = self.format_pipeline_request(command_stack)
-
-        if (self.password and
-            self.connection.info.get('pass', None) != self.password):
-            yield gen.Task(self.auth, self.password)
-        if (self.selected_db and
-            self.connection.info.get('db', None) != self.selected_db):
-            r = yield gen.Task(self.select, self.selected_db)
-
-        if not self.connection.connected():
-            self.connection.connect()
-
-        if not self.connection.ready():
-            yield gen.Task(self.connection.wait_until_ready)
-
+        self.executing = True
         try:
-            self.connection.write(request)
-        except IOError:
-            self.command_stack = []
-            self.connection.disconnect()
-            raise ConnectionError("Socket closed on remote end")
-        except Exception, e:
-            self.command_stack = []
-            self.connection.disconnect()
-            raise e
+            if self.transactional:
+                command_stack = ([CmdLine('MULTI')] +
+                                 command_stack +
+                                 [CmdLine('EXEC')])
 
-        responses = []
-        total = len(command_stack)
-        cmds = iter(command_stack)
+            request = self.format_pipeline_request(command_stack)
 
-        while len(responses) < total:
-            data = yield gen.Task(self.connection.readline)
-            if not data:
-                raise ResponseError('Not enough data after EXEC')
+            password_should_be_sent = (
+                self.password and
+                self.connection.info.get('pass', None) != self.password)
+            if password_should_be_sent:
+                yield gen.Task(self.auth, self.password)
+            db_should_be_selected = (
+                self.selected_db and
+                self.connection.info.get('db', None) != self.selected_db)
+            if db_should_be_selected:
+                yield gen.Task(self.select, self.selected_db)
+
+            if not self.connection.connected():
+                self.connection.connect()
+
+            if not self.connection.ready():
+                yield gen.Task(self.connection.wait_until_ready)
+
             try:
-                cmd_line = cmds.next()
-                if self.transactional and cmd_line.cmd != 'EXEC':
-                    response = yield gen.Task(self.process_data,
-                                              data,
-                                              CmdLine('MULTI_PART'))
-                else:
-                    response = yield gen.Task(self.process_data,
-                                              data,
-                                              cmd_line)
-                responses.append(response)
+                self.connection.write(request)
+            except IOError:
+                self.command_stack = []
+                self.connection.disconnect()
+                raise ConnectionError("Socket closed on remote end")
             except Exception, e:
-                responses.append(e)
+                self.command_stack = []
+                self.connection.disconnect()
+                raise e
 
-        if self.transactional:
-            command_stack = command_stack[:-1]
-            responses = responses[-1]
-            results = self.format_replies(command_stack[1:], responses)
-        else:
-            results = self.format_replies(command_stack, responses)
+            responses = []
+            total = len(command_stack)
+            cmds = iter(command_stack)
 
-        self.connection.execute_pending_command()
+            while len(responses) < total:
+                data = yield gen.Task(self.connection.readline)
+                if not data:
+                    raise ResponseError('Not enough data after EXEC')
+                try:
+                    cmd_line = cmds.next()
+                    if self.transactional and cmd_line.cmd != 'EXEC':
+                        response = self.process_data(data,
+                                                     CmdLine('MULTI_PART'))
+                    else:
+                        response = self.process_data(data, cmd_line)
+                    if isinstance(response, partial):
+                        response = yield gen.Task(response)
+                    responses.append(response)
+                except Exception, e:
+                    responses.append(e)
+
+            if self.transactional:
+                command_stack = command_stack[:-1]
+                responses = responses[-1]
+                results = self.format_replies(command_stack[1:], responses)
+            else:
+                results = self.format_replies(command_stack, responses)
+
+            self.connection.execute_pending_command()
+        finally:
+            self.executing = False
 
         callback(results)
