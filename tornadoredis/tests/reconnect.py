@@ -3,7 +3,7 @@ import socket
 from functools import partial
 
 from tornado import gen
-from tornado.netutil import TCPServer
+from tornado.tcpserver import TCPServer
 
 from tornado.testing import AsyncTestCase
 
