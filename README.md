@@ -18,12 +18,12 @@ Use tornado-redis to subscribe to Pub/Sub notifications and for blocking command
 You may safely use redis-py for most of other cases.
 
 I suggest NOT to use connection pools with redis-py client.
-In most cases you may use a single 'gloabal' instance of Redis object wherever you'll need it.
+In most cases you may use a single 'global' instance of Redis object wherever you'll need it.
 
 Note, that Tornado-redis is far less efficient than redis-py client in handling MGET/MSET requests and working with Pipelines.
 I suggest using the redis-py client and hiredis transport to get maximum performance on these commands.
 
-Please check [my answer on StackOverflow on querying Redis server from Tornado application](http://stackoverflow.com/questions/5953786/how-do-you-properly-query-redis-from-tornado/15596969#15596969) for details.
+Please check [my answer on StackOverflow on querying Redis server from Tornado application](http://stackoverflow.com/questions/5953786/how-do-you-properly-query-redis-from-tornado/15596969#15596969) for some additional details.
 
 Installation
 ------------
