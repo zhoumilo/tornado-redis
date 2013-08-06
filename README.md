@@ -134,6 +134,45 @@ Note that nothing is being sent to the Redis server until the `pipe.execute`
 method call so there is no need to wrap a `pipe.hset` and `pipe.expire`
 calls with the `yield gen.Task(...)` statement.
 
+Using Locks
+-----------
+
+A Lock is a synchronization mechanism for the enforcing of limits on access to a resource in
+an environment where there are many threads of execution. In this case, the Lock uses the
+Redis server as state store, thus it can be used by multiple processes/computers to allow
+distributed coordination.
+
+Here is a simple example of how to use a lock:
+
+    client = Client()
+
+    # Create a 'Lock' object, with a maximum lock time of 10 seconds, and a polling interval
+    # of 100ms
+    my_lock = client.lock("testLock", lock_ttl=10, polling_interval=0.1)
+    
+    # Try and acquire the lock, blocking until it is acquired or an error has occured.
+    # This does not block the IOLoop in any way.
+    result = yield gen.Task(my_lock.acquire, blocking=True)
+
+    # Create another, identical lock and try and acquire it
+    his_lock = client.lock("testLock", lock_ttl=10, polling_interval=0.1)
+    # We will fail, as the lock is already acquired by my_lock. Result will be False
+    result = yield gen.Task(his_lock.acquire, blocking=False)
+
+    # Schedule my_lock to be released in 5 seconds
+    client._io_loop.add_timeout(client._io_loop.time() + 5, my_lock.release)
+
+    # Meanwhile, attempt to get the lock again. This time block until we succeed
+    # In 5 seconds, my_lock will be released and his_lock will be acquired instead
+    result = yield gen.Task(his_lock.acquire, blocking=True)
+
+    # Release the lock. Even if we don't, it will be timed out in 10 seconds 
+    # (because of the lock_ttl setting)
+    yield gen.Task(his_lock.release)
+
+In this case we chose to run both locks in the same process - generally, we prefer to use
+Redis locks only if we need to synchronize several processes on different machines.
+
 Connection Pool Support
 -----------------------
 
@@ -242,6 +281,8 @@ tornado-redis was inspired and based on the work of [Andy McCurdy](https://githu
 [Kwok-kuen Cheung](https://github.com/cheungpat)
 
 [Ofir Herzas](https://github.com/herzaso)
+
+[Alon Diamant](https://github.com/advance512)
 
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
 are maintained by [Vlad Glushchuk](https://github.com/leporo).
