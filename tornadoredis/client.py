@@ -378,7 +378,7 @@ class Client(object):
             if not self.connection.connected():
                 self.connection.connect()
 
-            if not self.connection.ready():
+            if not self.subscribed and not self.connection.ready():
                 yield gen.Task(self.connection.wait_until_ready)
 
             if not self.subscribed and cmd not in ('AUTH', 'SELECT'):
@@ -1002,7 +1002,7 @@ class Client(object):
     def on_subscribed(self, result):
         self.subscribed.add(result.channel)
 
-    def on_unsubscribed(self, channels):
+    def on_unsubscribed(self, channels, *args, **kwargs):
         for channel in channels:
             self.subscribed.remove(channel)
 
