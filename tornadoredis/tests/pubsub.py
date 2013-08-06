@@ -33,8 +33,8 @@ class PubSubTestCase(RedisTestCase):
         self._message_count += 1
         self.assertIn(msg.kind, self._expected_messages)
         expected = self._expected_messages[msg.kind]
-        self.assertEqual(msg.pattern, expected[0])
-        self.assertEqual(msg.body, expected[1])
+        self.assertIn(msg.pattern, expected[0::2])
+        self.assertIn(msg.body, expected[1::2])
         if msg.kind in ('subscribe', 'psubscribe'):
             if self._subscribe_callback:
                 cb = self._subscribe_callback
@@ -60,11 +60,62 @@ class PubSubTestCase(RedisTestCase):
         yield gen.Task(self.publisher.publish, 'foo', 'bar')
         yield gen.Task(self.publisher.publish, 'foo', 'bar')
         yield gen.Task(self.publisher.publish, 'foo', 'bar')
-        yield gen.Task(self.client.unsubscribe, 'foo')
 
         yield gen.Wait('done')
 
+        yield gen.Task(self.client.unsubscribe, 'foo')
+
         self.assertEqual(self._message_count, 3)
+        self.assertFalse(self.client.subscribed)
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_pub_sub_multiple(self):
+        self._expect_messages({'subscribe': ('foo', 1, 'boo', 2),
+                               'message': ('foo', 'bar', 'boo', 'zar'),
+                               'unsubscribe': ('foo', 0, 'boo', 0)},
+                              4,
+                              subscribe_callback=(yield gen.Callback('sub')),
+                              callback=(yield gen.Callback('done')))
+        yield gen.Task(self.client.subscribe, 'foo')
+        self.client.listen(self._handle_message)
+        yield gen.Wait('sub')
+        yield gen.Task(self.client.subscribe, 'boo')
+        yield gen.Task(self.publisher.publish, 'foo', 'bar')
+        yield gen.Task(self.publisher.publish, 'boo', 'zar')
+
+        yield gen.Wait('done')
+
+        yield gen.Task(self.client.unsubscribe, ['foo', 'boo'])
+
+        self.assertEqual(self._message_count, 4)
+        self.assertFalse(self.client.subscribed)
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_pub_sub_multiple_2(self):
+        self._expect_messages({'subscribe': ('foo', 1, 'boo', 2),
+                               'message': ('foo', 'bar', 'boo', 'zar'),
+                               'unsubscribe': ('foo', 0, 'boo', 0)},
+                              4,
+                              subscribe_callback=(yield gen.Callback('sub')),
+                              callback=(yield gen.Callback('done')))
+
+        yield gen.Task(self.client.subscribe, ['foo', 'boo'])
+        self.client.listen(self._handle_message)
+        yield gen.Wait('sub')
+
+        yield gen.Task(self.publisher.publish, 'foo', 'bar')
+        yield gen.Task(self.publisher.publish, 'boo', 'zar')
+
+        yield gen.Wait('done')
+
+        yield gen.Task(self.client.unsubscribe, ['foo', 'boo'])
+
+        self.assertEqual(self._message_count, 4)
+        self.assertFalse(self.client.subscribed)
         self.stop()
 
     @async_test

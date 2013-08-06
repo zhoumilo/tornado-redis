@@ -4,6 +4,7 @@ import weakref
 from collections import deque
 
 from tornado.iostream import IOStream
+from tornado import stack_context
 
 from .exceptions import ConnectionError
 
@@ -48,6 +49,7 @@ class Connection(object):
     def wait_until_ready(self, callback=None):
         if callback:
             if not self.ready():
+                callback = stack_context.wrap(callback)
                 self.ready_callbacks.append(callback)
             else:
                 callback()
@@ -104,6 +106,7 @@ class Connection(object):
                                   'non-existent connection')
 
         if callback:
+            callback = stack_context.wrap(callback)
             _callback = lambda: callback(None)
             self.read_callbacks.add(_callback)
             cb = partial(self.read_callback, _callback)
@@ -121,6 +124,7 @@ class Connection(object):
                 self.disconnect()
                 raise ConnectionError('Tried to read from '
                                       'non-existent connection')
+            callback = stack_context.wrap(callback)
             self.read_callbacks.add(callback)
             self._stream.read_bytes(length,
                                     callback=partial(self.read_callback,
@@ -141,6 +145,7 @@ class Connection(object):
                 self.disconnect()
                 raise ConnectionError('Tried to read from '
                                       'non-existent connection')
+            callback = stack_context.wrap(callback)
             self.read_callbacks.add(callback)
             self._stream.read_until('\r\n',
                                     callback=partial(self.read_callback,

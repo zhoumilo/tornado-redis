@@ -144,13 +144,13 @@ class DisconnectTestCase(AsyncTestCase):
 
         def handle_message(msg):
             if msg.kind == 'disconnect':
-                cb_disconnect(True)
+                cb_disconnect(msg.channel)
 
         yield gen.Task(self.client.subscribe, 'foo')
         self._server.disconnect()
         self.client.listen(handle_message)
         res = yield gen.Wait('disconnect')
-        self.assertTrue(res)
+        self.assertEqual(res, {'foo'})
         self.assertFalse(self.client.subscribed)
 
         self.stop()

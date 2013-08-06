@@ -5,7 +5,7 @@ try:
 except ImportError:
     from distutils.core import setup
 
-VERSION = '2.4.2'
+VERSION = '2.4.3'
 
 setup(name='tornado-redis',
       version=VERSION,

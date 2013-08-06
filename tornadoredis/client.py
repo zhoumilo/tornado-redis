@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from functools import partial
 from itertools import izip
-from collections import namedtuple
+from collections import namedtuple, deque, defaultdict
 import logging
 import weakref
 import datetime
@@ -9,6 +9,7 @@ import time as mod_time
 
 from tornado.ioloop import IOLoop
 from tornado import gen
+from tornado import stack_context
 
 from .exceptions import RequestError, ConnectionError, ResponseError
 from .connection import Connection
@@ -82,17 +83,17 @@ def reply_datetime(r, *args, **kwargs):
 
 
 def reply_pubsub_message(r, *args, **kwargs):
-    '''
+    """
     Handles a Pub/Sub message and packs its data into a Message object.
-    '''
+    """
     if len(r) == 3:
         (kind, channel, body) = r
         pattern = channel
     elif len(r) == 4:
         (kind, pattern, channel, body) = r
-    elif len(r) == 1:
-        kind = r[0]
-        channel = body = pattern = None
+    elif len(r) == 2:
+        (kind, channel) = r
+        body = pattern = None
     else:
         raise ValueError('Invalid number of arguments')
     return Message(kind, channel, body, pattern)
@@ -145,14 +146,14 @@ def to_list(source):
         return list(source)
 
 
-PUB_SUB_COMMANDS = set([
+PUB_SUB_COMMANDS = (
     'SUBSCRIBE',
     'PSUBSCRIBE',
-    'UNSUBSCRIBE',
-    'PUNSUBSCRIBE',
+#    'UNSUBSCRIBE',
+#    'PUNSUBSCRIBE',
     # Not a command at all
     'LISTEN',
-])
+)
 
 
 REPLY_MAP = dict_merge(
@@ -215,7 +216,8 @@ class Client(object):
                                     weak_event_handler=self._weak,
                                     io_loop=self._io_loop)
         self.connection = connection
-        self.subscribed = False
+        self.subscribed = set()
+        self.subscribe_callbacks = deque()
         self.password = password
         self.selected_db = selected_db
         self._pipeline = None
@@ -293,7 +295,7 @@ class Client(object):
 
     def on_disconnect(self):
         if self.subscribed:
-            self.subscribed = False
+            self.subscribed = set()
         raise ConnectionError("Socket closed on remote end")
 
     #### connection
@@ -359,6 +361,7 @@ class Client(object):
     @gen.engine
     def execute_command(self, cmd, *args, **kwargs):
         result = None
+        execute_pending = cmd not in ('AUTH', 'SELECT')
 
         callback = kwargs.get('callback', None)
         del kwargs['callback']
@@ -396,9 +399,11 @@ class Client(object):
                 else:
                     continue
 
-            if ((cmd in PUB_SUB_COMMANDS) or
-                (self.subscribed and cmd == 'PUBLISH')):
+            listening = ((cmd in PUB_SUB_COMMANDS) or
+                         (self.subscribed and cmd == 'PUBLISH'))
+            if listening:
                 result = True
+                execute_pending = False
                 break
             else:
                 result = None
@@ -413,7 +418,7 @@ class Client(object):
                     result = self.format_reply(cmd_line, resp)
                     break
 
-        if cmd not in ('AUTH', 'SELECT'):
+        if execute_pending:
             self.connection.execute_pending_command()
 
         if callback:
@@ -972,17 +977,34 @@ class Client(object):
         if isinstance(channels, basestring):
             channels = [channels]
         if not self.subscribed:
-            original_callback = callback
+            listen_callback = None
+            original_cb = stack_context.wrap(callback) if callback else None
 
             def _cb(*args, **kwargs):
-                self.on_subscribed(*args, **kwargs)
-                original_callback(*args, **kwargs)
+                self.on_subscribed(Message(kind='subscribe',
+                                           channel=channels[0],
+                                           body=None,
+                                           pattern=None))
+                if original_cb:
+                    original_cb(True)
 
-            callback = _cb if original_callback else self.on_subscribed
+            callback = _cb
+        else:
+            listen_callback = callback
+            callback = None
+        # Use the listen loop to execute subscribe callbacks
+        for channel in channels:
+            self.subscribe_callbacks.append((channel, listen_callback))
+            # Do not execute the same callback multiple times
+            listen_callback = None
         self.execute_command(cmd, *channels, callback=callback)
 
     def on_subscribed(self, result):
-        self.subscribed = True
+        self.subscribed.add(result.channel)
+
+    def on_unsubscribed(self, channels):
+        for channel in channels:
+            self.subscribed.remove(channel)
 
     def unsubscribe(self, channels, callback=None):
         self._unsubscribe('UNSUBSCRIBE', channels, callback=callback)
@@ -993,10 +1015,17 @@ class Client(object):
     def _unsubscribe(self, cmd, channels, callback=None):
         if isinstance(channels, basestring):
             channels = [channels]
-        self.execute_command(cmd, *channels, callback=callback)
+        if callback:
+            cb = stack_context.wrap(callback)
 
-    def on_unsubscribed(self, *args, **kwargs):
-        self.subscribed = False
+            def handle_unsubscribe(result):
+                self.on_unsubscribed(channels)
+                cb(result)
+
+            callback = handle_unsubscribe
+        else:
+            callback = partial(self.on_unsubscribed, channels)
+        self.execute_command(cmd, *channels, callback=callback)
 
     def publish(self, channel, message, callback=None):
         self.execute_command('PUBLISH', channel, message, callback=callback)
@@ -1020,8 +1049,15 @@ class Client(object):
                     # Disconnected from the redis server
                     pass
 
-            yield client.subscribe('channel_name')
+            yield gen.Tasj(client.subscribe, 'channel_name')
             client.listen(handle_message)
+            ...
+            yield gen.Task(client.subscribe, 'another_channel_name')
+            ...
+            yield gen.Task(client.unsubscribe, 'another_channel_name')
+            yield gen.Task(client.unsubscribe, 'channel_name')
+
+        Unsubscribe from a channel to exit the 'listen' loop.
         """
         if callback:
             def error_wrapper(e):
@@ -1037,13 +1073,17 @@ class Client(object):
                     raise data
 
                 if data is None:
-                    # Disconnected from a server
-                    self.subscribed = False
-                    # Notify a calling
-                    callback(reply_pubsub_message(('disconnect', )))
+                    # If disconnected from the redis server clear the list
+                    # of channels this client has subscribed to
+                    channels = self.subscribed
+                    self.subscribed = set()
+                    # send a message to caller:
+                    # Message(kind='disconnect', channel=set(channel1, ...))
+                    callback(reply_pubsub_message(('disconnect', channels)))
                     return
 
                 response = self.process_data(data, cmd_listen)
+
                 if isinstance(response, partial):
                     response = yield gen.Task(response)
                 if isinstance(response, Exception):
@@ -1051,10 +1091,16 @@ class Client(object):
 
                 result = self.format_reply(cmd_listen, response)
 
+                if result and result.kind in ('subscribe', 'psubscribe'):
+                    self.on_subscribed(result)
+                    try:
+                        __, cb = self.subscribe_callbacks.popleft()
+                    except IndexError:
+                        __, cb = result.channel, None
+                    if cb:
+                        cb(True)
+
                 callback(result)
-                if result.kind in ['unsubscribe', 'punsubscribe'] \
-                and result.body == 0:
-                    self.on_unsubscribed()
 
     ### CAS
     def watch(self, *key_names, **kwargs):
