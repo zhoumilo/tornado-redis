@@ -149,8 +149,8 @@ def to_list(source):
 PUB_SUB_COMMANDS = (
     'SUBSCRIBE',
     'PSUBSCRIBE',
-#    'UNSUBSCRIBE',
-#    'PUNSUBSCRIBE',
+    'UNSUBSCRIBE',
+    'PUNSUBSCRIBE',
     # Not a command at all
     'LISTEN',
 )
