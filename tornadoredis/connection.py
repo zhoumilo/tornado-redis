@@ -11,14 +11,11 @@ from .exceptions import ConnectionError
 
 class Connection(object):
     def __init__(self, host='localhost', port=6379, unix_socket_path=None,
-                 weak_event_handler=None, stop_after=None, io_loop=None):
+                 event_handler_proxy=None, stop_after=None, io_loop=None):
         self.host = host
         self.port = port
         self.unix_socket_path = unix_socket_path
-        if weak_event_handler:
-            self._event_handler = weak_event_handler
-        else:
-            self._event_handler = None
+        self._event_handler = event_handler_proxy
         self.timeout = stop_after
         self._stream = None
         self._io_loop = io_loop
@@ -90,13 +87,14 @@ class Connection(object):
                 if s.socket:
                     s.socket.shutdown(socket.SHUT_RDWR)
                 s.close()
-            except socket.error:
+            except:
                 pass
 
     def fire_event(self, event):
-        if self._event_handler:
+        event_handler = self._event_handler
+        if event_handler:
             try:
-                getattr(self._event_handler, event)()
+                getattr(event_handler, event)()
             except AttributeError:
                 pass
 
@@ -181,7 +179,7 @@ class ConnectionPool(object):
         self._in_use_connections = set()
         self._waiting_clients = set()
 
-    def get_connection(self, event_handler_proxy=None):
+    def get_connection(self, event_handler_ref=None):
         """
         Returns a pooled Redis server connection
         """
@@ -190,10 +188,10 @@ class ConnectionPool(object):
         except KeyError:
             connection = self.make_connection()
         if connection:
-            connection._event_handler = event_handler_proxy
+            connection._event_handler = event_handler_ref
             self._in_use_connections.add(connection)
         elif self.wait_for_avaliable:
-            connection = self.make_proxy(client_proxy=event_handler_proxy)
+            connection = self.make_proxy(client_proxy=event_handler_ref)
         else:
             raise ConnectionError("Too many connections")
         return connection
@@ -254,10 +252,14 @@ class ConnectionProxy(object):
     """
     def __init__(self, pool=None, client_proxy=None, connected=True):
         self.client = client_proxy
-        self.pool = weakref.proxy(pool)
+        self._pool = weakref.ref(pool)
         self.ready_callbacks = []
         self._connected = connected
         self.info = {'db': -1}
+
+    @property
+    def pool(self):
+        return self._pool()
 
     def connected(self):
         return self._connected

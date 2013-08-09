@@ -149,6 +149,15 @@ Use the following command to run the test suite:
 	python -m tornado.testing tornadoredis.tests
 
 
+Or use the tox to test how it works in different environments:
+
+    tox
+
+or
+
+    tox -e pypy
+
+
 Credits and Contributors
 ------------------------
 

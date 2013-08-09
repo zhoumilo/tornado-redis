@@ -1,13 +1,21 @@
-#!/usr/bin/env python
+import sys
+import gc
 from functools import partial
 from random import randint
 
 from tornado import gen
+import tornado.ioloop
 
 import tornadoredis
 from tornadoredis.exceptions import ConnectionError
 
 from redistest import RedisTestCase, async_test
+
+
+try:
+    PYPY_INTERPRETER = 'PyPy' in sys.version
+except AttributeError:
+    PYPY_INTERPRETER = False
 
 
 class ConnectionPoolTestCase(RedisTestCase):
@@ -122,13 +130,18 @@ class ConnectionPoolTestCase(RedisTestCase):
             n2 = yield gen.Task(c.get, 'foo')
             self.assertEqual(n, n2)
 
-            callback(True)
+            if PYPY_INTERPRETER:
+                tornado.ioloop.IOLoop.current().add_callback(callback)
+            else:
+                callback(True)
 
         pool = self._new_pool(max_connections=1)
 
         for __ in xrange(1, 3):
             yield gen.Task(some_code, pool,
                            on_client_destroy=(yield gen.Callback('destroy')))
+            if PYPY_INTERPRETER:
+                gc.collect()
             yield gen.Wait('destroy')
 
         self.stop()
@@ -159,7 +172,6 @@ class ConnectionPoolTestCase(RedisTestCase):
 
         self.stop()
 
-
     @async_test
     @gen.engine
     def test_select_db_and_pipeline(self):
@@ -176,11 +188,11 @@ class ConnectionPoolTestCase(RedisTestCase):
         yield gen.Task(c.select, 9)
         n9 = yield gen.Task(c.get, 'foo')
         self.assertEqual(n9, foo_9)
+        yield gen.Task(c.disconnect)
 
         # Check the values using a connection pool and pipelines
         self.pool = self._new_pool(max_connections=1,
                                    wait_for_available=True)
-
         c = self._new_client(pool=self.pool, selected_db=9)
         pipe = c.pipeline()
         pipe.get('foo')
@@ -198,6 +210,8 @@ class ConnectionPoolTestCase(RedisTestCase):
         # self.assertEqual(res, foo_10)
         # c.disconnect()
 
+        yield gen.Task(c.disconnect)
+
         c = self._new_client(pool=self.pool, selected_db=9)
         pipe = c.pipeline()
         pipe.get('foo')
@@ -205,5 +219,18 @@ class ConnectionPoolTestCase(RedisTestCase):
         self.assertTrue(res)
         res = res[0]
         self.assertEqual(res, foo_9)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_disconnect(self):
+        pool = self._new_pool(max_connections=2, wait_for_available=True)
+        keys = ['foo%d' % n for n in xrange(1, 5)]
+        vals = yield [gen.Task(self._set_random_using_new_connection, pool, k)
+                      for k in keys]
+        c3 = self._new_client(pool)
+        vals_saved = yield gen.Task(c3.mget, keys)
+        self.assertEqual(vals, vals_saved)
 
         self.stop()
