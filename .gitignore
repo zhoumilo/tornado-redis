@@ -12,3 +12,4 @@ src/*.egg-info/*
 /.idea
 /build
 /dist
+/.tox

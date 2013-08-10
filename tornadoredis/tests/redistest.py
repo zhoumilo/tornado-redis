@@ -67,7 +67,6 @@ class RedisTestCase(AsyncTestCase):
                                  selected_db=selected_db,
                                  connection_pool=pool,
                                  on_destroy=on_destroy)
-
         return client
 
     def delayed(self, timeout, cb):

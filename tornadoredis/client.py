@@ -209,11 +209,11 @@ class Client(object):
         self._weak = weakref.proxy(self)
         if connection_pool:
             connection = (connection_pool
-                          .get_connection(event_handler_proxy=self._weak))
+                          .get_connection(event_handler_ref=self._weak))
         else:
             connection = Connection(host=host, port=port,
                                     unix_socket_path=unix_socket_path,
-                                    weak_event_handler=self._weak,
+                                    event_handler_proxy=self._weak,
                                     io_loop=self._io_loop)
         self.connection = connection
         self.subscribed = set()
@@ -304,7 +304,7 @@ class Client(object):
             pool = self._connection_pool
             if pool:
                 old_conn = self.connection
-                self.connection = pool.get_connection(event_handler_proxy=self)
+                self.connection = pool.get_connection(event_handler_ref=self)
                 self.connection.ready_callbacks = old_conn.ready_callbacks
             else:
                 self.connection.connect()
