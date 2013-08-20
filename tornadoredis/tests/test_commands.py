@@ -5,7 +5,7 @@ import time as mod_time
 
 from tornado import gen
 
-from redistest import RedisTestCase, async_test
+from .redistest import RedisTestCase, async_test
 
 
 class ServerCommandsTestCase(RedisTestCase):
@@ -13,10 +13,10 @@ class ServerCommandsTestCase(RedisTestCase):
     @async_test
     @gen.engine
     def test_setget_unicode(self):
-        res = yield gen.Task(self.client.set, 'foo', u'бар')
+        res = yield gen.Task(self.client.set, 'foo', 'бар')
         self.assertEqual(res, True)
         res = yield gen.Task(self.client.get, 'foo')
-        self.assertEqual(res, 'бар')
+        self.assertEqual(res, u'бар')
         self.stop()
 
     @async_test
@@ -783,7 +783,7 @@ class ServerCommandsTestCase(RedisTestCase):
     @gen.engine
     def test_zset(self):
         NUM = 100
-        long_list = map(str, xrange(0, NUM))
+        long_list = list(map(str, range(0, NUM)))
         for i in long_list:
             res = yield gen.Task(self.client.zadd, 'foobar', i, i)
             self.assertEqual(res, 1)

@@ -1,7 +1,7 @@
 from functools import partial
 from tornado import gen
 
-from redistest import RedisTestCase, async_test
+from .redistest import RedisTestCase, async_test
 
 
 class PubSubTestCase(RedisTestCase):

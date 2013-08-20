@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
+import sys
 from functools import partial
-from itertools import izip
+import collections
+
 from collections import namedtuple, deque, defaultdict
 import logging
 import weakref
@@ -10,6 +12,7 @@ import time as mod_time
 from tornado.ioloop import IOLoop
 from tornado import gen
 from tornado import stack_context
+from tornado.escape import utf8, to_unicode, to_basestring
 
 from .exceptions import RequestError, ConnectionError, ResponseError
 from .connection import Connection
@@ -19,6 +22,9 @@ log = logging.getLogger('tornadoredis.client')
 
 
 Message = namedtuple('Message', ('kind', 'channel', 'body', 'pattern'))
+
+
+PY3 = sys.version > '3'
 
 
 class CmdLine(object):
@@ -57,7 +63,7 @@ def reply_set(r, *args, **kwargs):
 
 
 def reply_dict_from_pairs(r, *args, **kwargs):
-    return dict(izip(r[::2], r[1::2]))
+    return dict(zip(r[::2], r[1::2]))
 
 
 def reply_str(r, *args, **kwargs):
@@ -102,11 +108,11 @@ def reply_pubsub_message(r, *args, **kwargs):
 def reply_zset(r, *args, **kwargs):
     if (not r) or (not 'WITHSCORES' in args):
         return r
-    return zip(r[::2], map(reply_number, r[1::2]))
+    return list(zip(r[::2], list(map(reply_number, r[1::2]))))
 
 
 def reply_hmget(r, key, *fields, **kwargs):
-    return dict(zip(fields, r))
+    return dict(list(zip(fields, r)))
 
 
 def reply_info(response, *args):
@@ -140,7 +146,7 @@ def reply_ttl(r, *args, **kwargs):
 
 
 def to_list(source):
-    if isinstance(source, basestring):
+    if isinstance(source, str):
         return [source]
     else:
         return list(source)
@@ -253,7 +259,7 @@ class Client(object):
         """
         a = super(Client, self).__getattribute__(item)
         try:
-            if callable(a) and a.__self__:
+            if isinstance(a, collections.Callable) and a.__self__:
                 try:
                     a = self.__class__.__dict__[item]
                 except KeyError:
@@ -330,17 +336,21 @@ class Client(object):
 
     #### formatting
     def encode(self, value):
-        if isinstance(value, str):
-            return value
-        elif isinstance(value, unicode):
-            return value.encode('utf-8')
-        return str(value)
+        if not isinstance(value, str):
+            value = str(value)
+        if PY3:
+            value = value.encode('utf-8')
+        else:
+            if isinstance(value, unicode):
+                value = value.encode('utf-8')
+        return value
 
     def format_command(self, *tokens, **kwargs):
         cmds = []
         for t in tokens:
             e_t = self.encode(t)
-            cmds.append('$%s\r\n%s\r\n' % (len(e_t), e_t))
+            e_t_s = to_basestring(e_t)
+            cmds.append('$%s\r\n%s\r\n' % (len(e_t), e_t_s))
         return '*%s\r\n%s' % (len(tokens), ''.join(cmds))
 
     def format_reply(self, cmd_line, data):
@@ -350,7 +360,7 @@ class Client(object):
             res = REPLY_MAP[cmd_line.cmd](data,
                                           *cmd_line.args,
                                           **cmd_line.kwargs)
-        except Exception, e:
+        except Exception as e:
             raise ResponseError(
                 'failed to format reply to %s, raw data: %s; err message: %s'
                 % (cmd_line, data, e), cmd_line
@@ -392,7 +402,7 @@ class Client(object):
             command = self.format_command(cmd, *args, **kwargs)
             try:
                 yield gen.Task(self.connection.write, command)
-            except Exception, e:
+            except Exception as e:
                 self.connection.disconnect()
                 if not n_tries:
                     raise e
@@ -432,10 +442,12 @@ class Client(object):
         if not response:
             raise ResponseError('EmptyResponse')
         else:
+            response = to_unicode(response)
             response = response[:-2]
         callback(response)
 
     def process_data(self, data, cmd_line):
+        data = to_basestring(data)
         data = data[:-2]  # strip \r\n
 
         if data == '$-1':
@@ -518,7 +530,7 @@ class Client(object):
         self.selected_db = db
         if self.connection.info.get('db', None) != db:
             self.connection.info['db'] = db
-            self.execute_command('SELECT', db, callback=callback)
+            self.execute_command('SELECT', '%s' % db, callback=callback)
         elif callback:
             callback(True)
 
@@ -637,14 +649,11 @@ class Client(object):
         self.execute_command('STRLEN', key, callback=callback)
 
     def mset(self, mapping, callback=None):
-        items = []
-        for pair in mapping.iteritems():
-            items.extend(pair)
+        items = [i for k, v in mapping.items() for i in (k, v)]
         self.execute_command('MSET', *items, callback=callback)
 
     def msetnx(self, mapping, callback=None):
-        items = []
-        [items.extend(pair) for pair in mapping.iteritems()]
+        items = [i for k, v in mapping.items() for i in (k, v)]
         self.execute_command('MSETNX', *items, callback=callback)
 
     def get(self, key, callback=None):
@@ -661,8 +670,8 @@ class Client(object):
 
     def sort(self, key, start=None, num=None, by=None, get=None, desc=False,
              alpha=False, store=None, callback=None):
-        if (start is not None and num is None) \
-        or (num is not None and start is None):
+        if ((start is not None and num is None) or
+                (num is not None and start is None)):
             raise ValueError("``start`` and ``num`` must both be specified")
 
         tokens = [key]
@@ -908,7 +917,7 @@ class Client(object):
     def _zaggregate(self, command, dest, keys, aggregate, callback):
         tokens = [dest, len(keys)]
         if isinstance(keys, dict):
-            items = keys.items()
+            items = list(keys.items())
             keys = [i[0] for i in items]
             weights = [i[1] for i in items]
         else:
@@ -927,8 +936,7 @@ class Client(object):
         self.execute_command('HGETALL', key, callback=callback)
 
     def hmset(self, key, mapping, callback=None):
-        items = []
-        map(items.extend, mapping.iteritems())
+        items = [i for k, v in mapping.items() for i in (k, v)]
         self.execute_command('HMSET', key, *items, callback=callback)
 
     def hset(self, key, field, value, callback=None):
@@ -974,7 +982,7 @@ class Client(object):
         self._subscribe('PSUBSCRIBE', channels, callback=callback)
 
     def _subscribe(self, cmd, channels, callback=None):
-        if isinstance(channels, basestring):
+        if isinstance(channels, str):
             channels = [channels]
         if not self.subscribed:
             listen_callback = None
@@ -1013,7 +1021,7 @@ class Client(object):
         self._unsubscribe('PUNSUBSCRIBE', channels, callback=callback)
 
     def _unsubscribe(self, cmd, channels, callback=None):
-        if isinstance(channels, basestring):
+        if isinstance(channels, str):
             channels = [channels]
         if callback:
             cb = stack_context.wrap(callback)
@@ -1182,7 +1190,7 @@ class Pipeline(Client):
         for cmd_line, response in zip(cmd_lines, responses):
             try:
                 results.append(self.format_reply(cmd_line, response))
-            except Exception, e:
+            except Exception as e:
                 results.append(e)
         return results
 
@@ -1226,7 +1234,7 @@ class Pipeline(Client):
                 self.command_stack = []
                 self.connection.disconnect()
                 raise ConnectionError("Socket closed on remote end")
-            except Exception, e:
+            except Exception as e:
                 self.command_stack = []
                 self.connection.disconnect()
                 raise e
@@ -1240,7 +1248,7 @@ class Pipeline(Client):
                 if not data:
                     raise ResponseError('Not enough data after EXEC')
                 try:
-                    cmd_line = cmds.next()
+                    cmd_line = next(cmds)
                     if self.transactional and cmd_line.cmd != 'EXEC':
                         response = self.process_data(data,
                                                      CmdLine('MULTI_PART'))
@@ -1249,7 +1257,7 @@ class Pipeline(Client):
                     if isinstance(response, partial):
                         response = yield gen.Task(response)
                     responses.append(response)
-                except Exception, e:
+                except Exception as e:
                     responses.append(e)
 
             if self.transactional:

@@ -9,7 +9,7 @@ import tornado.ioloop
 import tornadoredis
 from tornadoredis.exceptions import ConnectionError
 
-from redistest import RedisTestCase, async_test
+from .redistest import RedisTestCase, async_test
 
 
 try:
@@ -44,7 +44,7 @@ class ConnectionPoolTestCase(RedisTestCase):
     @gen.engine
     def test_wait_for_available(self):
         pool = self._new_pool(max_connections=2, wait_for_available=True)
-        keys = ['foo%d' % n for n in xrange(1, 5)]
+        keys = ['foo%d' % n for n in range(1, 5)]
         vals = yield [gen.Task(self._set_random_using_new_connection, pool, k)
                       for k in keys]
         c3 = self._new_client(pool)
@@ -137,7 +137,7 @@ class ConnectionPoolTestCase(RedisTestCase):
 
         pool = self._new_pool(max_connections=1)
 
-        for __ in xrange(1, 3):
+        for __ in range(1, 3):
             yield gen.Task(some_code, pool,
                            on_client_destroy=(yield gen.Callback('destroy')))
             if PYPY_INTERPRETER:
@@ -226,7 +226,7 @@ class ConnectionPoolTestCase(RedisTestCase):
     @gen.engine
     def test_disconnect(self):
         pool = self._new_pool(max_connections=2, wait_for_available=True)
-        keys = ['foo%d' % n for n in xrange(1, 5)]
+        keys = ['foo%d' % n for n in range(1, 5)]
         vals = yield [gen.Task(self._set_random_using_new_connection, pool, k)
                       for k in keys]
         c3 = self._new_client(pool)
