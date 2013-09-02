@@ -5,7 +5,7 @@ try:
 except ImportError:
     from distutils.core import setup
 
-VERSION = '2.4.5'
+VERSION = '2.4.6'
 
 setup(name='tornado-redis',
       version=VERSION,
@@ -15,5 +15,4 @@ setup(name='tornado-redis',
       license="http://www.apache.org/licenses/LICENSE-2.0",
       url='http://github.com/leporo/tornado-redis',
       keywords=['Redis', 'Tornado'],
-      packages=['tornadoredis'],
-      use_2to3=True, )
+      packages=['tornadoredis'])
