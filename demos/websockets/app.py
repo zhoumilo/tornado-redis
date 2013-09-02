@@ -1,3 +1,4 @@
+from __future__ import print_function
 import tornado.httpserver
 import tornado.web
 import tornado.websocket
@@ -16,7 +17,7 @@ class MainHandler(tornado.web.RequestHandler):
         self.render("template.html", title="PubSub + WebSocket Demo")
 
 
-class NewMessage(tornado.web.RequestHandler):
+class NewMessageHandler(tornado.web.RequestHandler):
     def post(self):
         message = self.get_argument('message')
         c.publish('test_channel', message)
@@ -24,9 +25,9 @@ class NewMessage(tornado.web.RequestHandler):
         self.write('sent: %s' % (message,))
 
 
-class MessagesCatcher(tornado.websocket.WebSocketHandler):
+class MessageHandler(tornado.websocket.WebSocketHandler):
     def __init__(self, *args, **kwargs):
-        super(MessagesCatcher, self).__init__(*args, **kwargs)
+        super(MessageHandler, self).__init__(*args, **kwargs)
         self.listen()
 
     @tornado.gen.engine
@@ -40,9 +41,6 @@ class MessagesCatcher(tornado.websocket.WebSocketHandler):
         if msg.kind == 'message':
             self.write_message(str(msg.body))
         if msg.kind == 'disconnect':
-            # Do not forget to restart a listen loop
-            # after a successful reconnect attempt.
-
             # Do not try to reconnect, just send a message back
             # to the client and close the client connection
             self.write_message('The connection terminated '
@@ -57,12 +55,12 @@ class MessagesCatcher(tornado.websocket.WebSocketHandler):
 
 application = tornado.web.Application([
     (r'/', MainHandler),
-    (r'/msg', NewMessage),
-    (r'/track', MessagesCatcher),
+    (r'/msg', NewMessageHandler),
+    (r'/track', MessageHandler),
 ])
 
 if __name__ == '__main__':
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8888)
-    print 'Demo is runing at 0.0.0.0:8888\nQuit the demo with CONTROL-C'
+    print('Demo is runing at 0.0.0.0:8888\nQuit the demo with CONTROL-C')
     tornado.ioloop.IOLoop.instance().start()

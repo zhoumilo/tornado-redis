@@ -3,6 +3,7 @@ import socket
 from functools import partial
 
 from tornado import gen
+from tornado.escape import to_basestring
 from tornado.tcpserver import TCPServer
 
 from tornado.testing import AsyncTestCase
@@ -17,6 +18,7 @@ class DisconnectingRedisServer(TCPServer):
     def disconnect(self):
         # Using a single stream for testing
         stream = self._stream
+        self._stream = None
         try:
             stream.socket.shutdown(socket.SHUT_RDWR)
             stream.close()
@@ -27,24 +29,28 @@ class DisconnectingRedisServer(TCPServer):
     def handle_stream(self, stream, address):
         self.selected_db = 0
         self._stream = stream
-        n_args = yield gen.Task(stream.read_until, '\r\n')
+        CRLF = b'\r\n'
+        n_args = yield gen.Task(stream.read_until, CRLF)
+        n_args = to_basestring(n_args)
         while n_args and n_args[0] == '*':
-            yield gen.Task(stream.read_until, '\r\n')
-            command = yield gen.Task(stream.read_until, '\r\n')
+            yield gen.Task(stream.read_until, CRLF)
+            command = yield gen.Task(stream.read_until, CRLF)
+            command = to_basestring(command)
             # Read command arguments
             arg_num = int(n_args.strip()[1:]) - 1
             if arg_num > 0:
-                for __ in xrange(0, arg_num):
+                for __ in range(0, arg_num):
                     # read the $N line
-                    yield gen.Task(stream.read_until, '\r\n')
+                    yield gen.Task(stream.read_until, CRLF)
                     # read the argument line
-                    arg = yield gen.Task(stream.read_until, '\r\n')
+                    arg = yield gen.Task(stream.read_until, CRLF)
+                    arg = to_basestring(arg)
                     if command == 'SELECT\r\n':
                         self.selected_db = int(arg.strip())
-            stream.write('+OK\r\n')
+            stream.write(b'+OK\r\n')
             # Read the next command
-            n_args = yield gen.Task(stream.read_until, '\r\n')
-        self._stream = None
+            n_args = yield gen.Task(stream.read_until, CRLF)
+            n_args = to_basestring(n_args)
 
 
 class DisconnectTestCase(AsyncTestCase):
@@ -109,7 +115,7 @@ class DisconnectTestCase(AsyncTestCase):
         self._sleep()
 
         # check selected db
-        self.assertEquals(self.test_db, self._server.selected_db)
+        self.assertEqual(self.test_db, self._server.selected_db)
 
         # stop server
         self._server.disconnect()
@@ -135,7 +141,7 @@ class DisconnectTestCase(AsyncTestCase):
         self.wait()
 
         # check selected db
-        self.assertEquals(self.test_db, self._server.selected_db)
+        self.assertEqual(self.test_db, self._server.selected_db)
 
     @async_test
     @gen.engine

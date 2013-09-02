@@ -7,7 +7,7 @@ import tornado.ioloop
 
 from tornadoredis.exceptions import ResponseError
 
-from redistest import RedisTestCase, async_test
+from .redistest import RedisTestCase, async_test
 
 
 try:
@@ -40,7 +40,7 @@ class MiscTestCase(RedisTestCase):
                 del c
                 gc.collect()
 
-        for __ in xrange(1, 3):
+        for __ in range(1, 3):
             yield gen.Task(some_code)
 
         self.stop()
@@ -96,7 +96,7 @@ class MiscTestCase(RedisTestCase):
         @gen.engine
         def some_code(callback=None):
             c = self._new_client(on_destroy=callback)
-            for n in xrange(1, 5):
+            for n in range(1, 5):
                 yield gen.Task(c.set, 'foo', n)
                 n2 = yield gen.Task(c.get, 'foo')
                 self.assertEqual('%d' % n, n2)

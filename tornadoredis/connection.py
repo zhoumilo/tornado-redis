@@ -1,3 +1,4 @@
+import sys
 import socket
 from functools import partial
 import weakref
@@ -7,6 +8,13 @@ from tornado.iostream import IOStream
 from tornado import stack_context
 
 from .exceptions import ConnectionError
+
+
+PY3 = sys.version > '3'
+if PY3:
+    CRLF = b'\r\n'
+else:
+    CRLF = '\r\n'
 
 
 class Connection(object):
@@ -67,13 +75,13 @@ class Connection(object):
                 self._stream.set_close_callback(self.on_stream_close)
                 self.info['db'] = 0
                 self.info['pass'] = None
-            except socket.error, e:
+            except socket.error as e:
                 raise ConnectionError(str(e))
             self.fire_event('on_connect')
 
     def on_stream_close(self):
         if self._stream:
-            self._stream = None
+            self.disconnect()
             callbacks = self.read_callbacks
             self.read_callbacks = set()
             for callback in callbacks:
@@ -111,8 +119,10 @@ class Connection(object):
         else:
             cb = None
         try:
+            if PY3:
+                data = bytes(data, encoding='utf-8')
             self._stream.write(data, callback=cb)
-        except IOError, e:
+        except IOError as e:
             self.disconnect()
             raise ConnectionError(e.message)
 
@@ -145,9 +155,8 @@ class Connection(object):
                                       'non-existent connection')
             callback = stack_context.wrap(callback)
             self.read_callbacks.add(callback)
-            self._stream.read_until('\r\n',
-                                    callback=partial(self.read_callback,
-                                                     callback))
+            callback = partial(self.read_callback, callback)
+            self._stream.read_until(CRLF, callback=callback)
         except IOError:
             self.fire_event('on_disconnect')
 

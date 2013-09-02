@@ -2,7 +2,7 @@ import hashlib
 import logging
 from tornado import gen
 
-from redistest import RedisTestCase, async_test
+from .redistest import RedisTestCase, async_test
 
 
 class ScriptingTestCase(RedisTestCase):
@@ -11,7 +11,7 @@ class ScriptingTestCase(RedisTestCase):
     @gen.engine
     def test_eval(self):
         script = 'return 2'
-        script_digest = hashlib.sha1(script).hexdigest()
+        script_digest = hashlib.sha1(script.encode('utf-8')).hexdigest()
 
         results = yield gen.Task(self.client.eval, script)
         self.assertEqual(2, results)
