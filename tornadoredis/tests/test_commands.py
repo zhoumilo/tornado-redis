@@ -10,6 +10,10 @@ from .redistest import RedisTestCase, async_test
 
 class ServerCommandsTestCase(RedisTestCase):
 
+    def test_encode(self):
+        self.assertEqual(self.client.encode(u'ЯЯЯЯ'),
+                         b'\xd0\xaf\xd0\xaf\xd0\xaf\xd0\xaf')
+
     @async_test
     @gen.engine
     def test_setget_unicode(self):

@@ -337,12 +337,12 @@ class Client(object):
     #### formatting
     def encode(self, value):
         if not isinstance(value, str):
-            value = str(value)
+            if not PY3 and isinstance(value, unicode):
+                value = value.encode('utf-8')
+            else:
+                value = str(value)
         if PY3:
             value = value.encode('utf-8')
-        else:
-            if isinstance(value, unicode):
-                value = value.encode('utf-8')
         return value
 
     def format_command(self, *tokens, **kwargs):
