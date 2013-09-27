@@ -1026,11 +1026,7 @@ class Client(object):
         if callback:
             cb = stack_context.wrap(callback)
 
-            def handle_unsubscribe(result):
-                self.on_unsubscribed(channels)
-                cb(result)
-
-            callback = handle_unsubscribe
+            callback = cb
         else:
             callback = partial(self.on_unsubscribed, channels)
         self.execute_command(cmd, *channels, callback=callback)
@@ -1107,6 +1103,9 @@ class Client(object):
                         __, cb = result.channel, None
                     if cb:
                         cb(True)
+
+                if result and result.kind in ('unsubscribe', 'punsubscribe'):
+                    self.on_unsubscribed([result.channel])
 
                 callback(result)
 
