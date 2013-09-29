@@ -1035,7 +1035,7 @@ class Client(object):
         self.execute_command('PUBLISH', channel, message, callback=callback)
 
     @gen.engine
-    def listen(self, callback=None):
+    def listen(self, callback=None, exit_callback=None):
         """
         Starts a Pub/Sub channel listening loop.
         Use the unsubscribe or punsubscribe methods to exit it.
@@ -1108,6 +1108,9 @@ class Client(object):
                     self.on_unsubscribed([result.channel])
 
                 callback(result)
+
+        if exit_callback:
+            exit_callback(bool(callback))
 
     ### CAS
     def watch(self, *key_names, **kwargs):
