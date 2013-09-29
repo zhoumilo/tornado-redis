@@ -183,6 +183,8 @@ tornado-redis was inspired and based on the work of [Andy McCurdy](https://githu
 
 [Lessandro Mariano](https://github.com/lessandro)
 
+[Kwok-kuen Cheung](https://github.com/cheungpat)
+
 The Tornado-Redis project's source code and 'tornado-redis' PyPI package
 are maintained by [Vlad Glushchuk](https://github.com/leporo).
 
