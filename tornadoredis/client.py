@@ -1053,7 +1053,7 @@ class Client(object):
                     # Disconnected from the redis server
                     pass
 
-            yield gen.Tasj(client.subscribe, 'channel_name')
+            yield gen.Task(client.subscribe, 'channel_name')
             client.listen(handle_message)
             ...
             yield gen.Task(client.subscribe, 'another_channel_name')
