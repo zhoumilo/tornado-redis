@@ -225,7 +225,7 @@ class Client(object):
         self.subscribed = set()
         self.subscribe_callbacks = deque()
         self.password = password
-        self.selected_db = selected_db
+        self.selected_db = selected_db or 0
         self._pipeline = None
 
     def __del__(self):
@@ -376,9 +376,9 @@ class Client(object):
         callback = kwargs.get('callback', None)
         del kwargs['callback']
         cmd_line = CmdLine(cmd, *args, **kwargs)
-        if self.subscribed and cmd not in PUB_SUB_COMMANDS:
+        if callback and self.subscribed and cmd not in PUB_SUB_COMMANDS:
             callback(RequestError(
-                'Calling not pub/sub command during subscribed state',
+                'Executing non-Pub/Sub command while in subscribed state',
                 cmd_line))
             return
 
@@ -392,11 +392,9 @@ class Client(object):
                 yield gen.Task(self.connection.wait_until_ready)
 
             if not self.subscribed and cmd not in ('AUTH', 'SELECT'):
-                if (self.password and
-                    self.connection.info.get('pass', None) != self.password):
+                if self.password and self.connection.info.get('pass', None) != self.password:
                     yield gen.Task(self.auth, self.password)
-                if (self.selected_db and
-                    self.connection.info.get('db', None) != self.selected_db):
+                if self.selected_db and self.connection.info.get('db', 0) != self.selected_db:
                     yield gen.Task(self.select, self.selected_db)
 
             command = self.format_command(cmd, *args, **kwargs)
@@ -1078,7 +1076,7 @@ class Client(object):
 
                 if data is None:
                     # If disconnected from the redis server clear the list
-                    # of channels this client has subscribed to
+                    # of subscriber this client has subscribed to
                     channels = self.subscribed
                     self.subscribed = set()
                     # send a message to caller:

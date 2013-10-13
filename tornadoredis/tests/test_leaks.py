@@ -63,28 +63,29 @@ class MiscTestCase(RedisTestCase):
 
         self.stop()
 
-    @async_test
-    @gen.engine
-    def test_with(self):
-        """
-        Find a way to destroy client instances created by
-        tornado.gen-wrapped functions.
-        """
+    if sys.version_info >= (2, 7):
+        @async_test
         @gen.engine
-        def some_code(callback=None):
-            with self._new_client(on_destroy=callback) as c:
-                n = '%d' % random.randint(1, 1000)
-                yield gen.Task(c.set, 'foo', n)
-                n2 = yield gen.Task(c.get, 'foo')
-                self.assertEqual(n, n2)
-            # Force pypy to do the garbage collection
-            if PYPY_INTERPRETER:
-                del c
-                gc.collect()
+        def test_with(self):
+            """
+            Find a way to destroy client instances created by
+            tornado.gen-wrapped functions.
+            """
+            @gen.engine
+            def some_code(callback=None):
+                with self._new_client(on_destroy=callback) as c:
+                    n = '%d' % random.randint(1, 1000)
+                    yield gen.Task(c.set, 'foo', n)
+                    n2 = yield gen.Task(c.get, 'foo')
+                    self.assertEqual(n, n2)
+                # Force pypy to do the garbage collection
+                if PYPY_INTERPRETER:
+                    del c
+                    gc.collect()
 
-        yield gen.Task(some_code)
+            yield gen.Task(some_code)
 
-        self.stop()
+            self.stop()
 
     @async_test
     @gen.engine

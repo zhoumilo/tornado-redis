@@ -1,5 +1,4 @@
 import hashlib
-import logging
 from tornado import gen
 
 from .redistest import RedisTestCase, async_test

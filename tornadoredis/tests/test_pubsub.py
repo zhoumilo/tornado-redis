@@ -1,7 +1,9 @@
-from functools import partial
+import json
+from random import randint
 from tornado import gen
 
 from .redistest import RedisTestCase, async_test
+from tornadoredis.pubsub import SockJSSubscriber, SocketIOSubscriber
 
 
 class PubSubTestCase(RedisTestCase):
@@ -145,3 +147,117 @@ class PubSubTestCase(RedisTestCase):
 
         self.assertEqual(self._message_count, 3)
         self.stop()
+
+
+class DummyConnection(object):
+
+    def __init__(self):
+        self.messages = []
+
+    def broadcast(self, clients, message):
+        for client in clients:
+            client.messages.append(message)
+
+    def on_message(self, message):
+        self.messages.append(message)
+
+
+class SockJSSubscriberTestCase(RedisTestCase):
+
+    def setUp(self):
+        super(SockJSSubscriberTestCase, self).setUp()
+        self.publisher = self._new_client()
+        self.subscriber = SockJSSubscriber(self.client)
+
+    def tearDown(self):
+        if self.subscriber.is_subscribed():
+            self.subscriber.close()
+        try:
+            self.publisher.connection.disconnect()
+            del self.publisher
+        except AttributeError:
+            pass
+        super(SockJSSubscriberTestCase, self).tearDown()
+
+    @async_test
+    @gen.engine
+    def test_subscribe(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+        data = {'foo': randint(0, 1000)}
+        self.subscriber.publish('test.channel', data, client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        self.assertTrue(broadcaster.messages)
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_unsubscribe(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+        self.subscriber.unsubscribe('test.channel', broadcaster)
+
+        yield gen.Task(self.pause)
+
+        self.assertFalse(broadcaster.messages)
+
+        data = {'foo': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel', data,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        self.assertFalse(broadcaster.messages)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_subscribe_multiple(self):
+        broadcaster = DummyConnection()
+        broadcaster2 = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+        yield gen.Task(self.subscriber.subscribe, 'test.channel2', broadcaster)
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster2)
+        data = {'foo': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel', data,
+                       client=self.publisher)
+        data2 = {'foo2': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel2', data2,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        msgs = broadcaster.messages + broadcaster2.messages
+        self.assertEqual(len(msgs), 3)
+        self.assertEqual(len(broadcaster.messages), 2)
+        self.assertEqual(len(broadcaster2.messages), 1)
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+
+        self.subscriber.unsubscribe('test.channel', broadcaster2)
+
+        data2 = {'foo': randint(0, 1000)}
+
+        yield gen.Task(self.subscriber.publish, 'test.channel', data2,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        msgs = broadcaster.messages + broadcaster2.messages
+        self.assertEqual(len(msgs), 4)
+        self.assertEqual(len(broadcaster.messages), 3)
+        self.assertEqual(len(broadcaster2.messages), 1)
+        self.assertEqual(broadcaster.messages[2], json.dumps(data2))
+
+        self.stop()
+
+
+class SocketIOSubscriberTestCase(SockJSSubscriberTestCase):
+
+    def setUp(self):
+        super(SocketIOSubscriberTestCase, self).setUp()
+        self.subscriber = SocketIOSubscriber(self.client)

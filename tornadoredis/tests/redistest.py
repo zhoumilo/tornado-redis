@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+import sys
 import time
 
 from tornado.testing import AsyncTestCase
@@ -42,9 +42,49 @@ class TestRedisClient(tornadoredis.Client):
             self._on_destroy()
 
 
+if sys.version_info < (2, 7):
+    _MAX_LENGTH = 80
+    def safe_repr(obj, short=False):
+        try:
+            result = repr(obj)
+        except Exception:
+            result = object.__repr__(obj)
+        if not short or len(result) < _MAX_LENGTH:
+            return result
+        return result[:_MAX_LENGTH] + ' [truncated]...'
+
+
 class RedisTestCase(AsyncTestCase):
     test_db = 9
     test_port = 6379
+
+    if sys.version_info < (2, 7):
+        def assertIn(self, test_value, expected_set):
+            msg = "%s did not occur in %s" % (test_value, expected_set)
+            self.assert_(test_value in expected_set, msg)
+
+        def assertIsInstance(self, obj, cls, msg=None):
+            """Same as self.assertTrue(isinstance(obj, cls)), with a nicer
+            default message."""
+            if not isinstance(obj, cls):
+                standardMsg = '%s is not an instance of %r' % (safe_repr(obj), cls)
+                self.fail(self._formatMessage(msg, standardMsg))
+
+        def assertGreater(self, a, b, msg=None):
+            """Just like self.assertTrue(a > b), but with a nicer default message."""
+            if not a > b:
+                standardMsg = '%s not greater than %s' % (safe_repr(a), safe_repr(b))
+                self.fail(self._formatMessage(msg, standardMsg))
+
+        def assertGreaterEqual(self, a, b, msg=None):
+            if not a >= b:
+                standardMsg = '%s not greater than or equal to %s' % (safe_repr(a), safe_repr(b))
+                self.fail(self._formatMessage(msg, standardMsg))
+
+        def assertLessEqual(self, a, b, msg=None):
+            if not a <= b:
+                standardMsg = '%s not less than or equal to %s' % (safe_repr(a), safe_repr(b))
+                self.fail(self._formatMessage(msg, standardMsg))
 
     def setUp(self):
         super(RedisTestCase, self).setUp()
@@ -71,3 +111,6 @@ class RedisTestCase(AsyncTestCase):
 
     def delayed(self, timeout, cb):
         self.io_loop.add_timeout(time.time() + timeout, cb)
+
+    def pause(self, timeout=0.1, callback=None):
+        self.io_loop.add_timeout(time.time() + timeout, callback)

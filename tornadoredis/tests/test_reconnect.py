@@ -1,6 +1,5 @@
 import time
 import socket
-from functools import partial
 
 from tornado import gen
 from tornado.escape import to_basestring
@@ -123,10 +122,10 @@ class DisconnectTestCase(AsyncTestCase):
         self.server_running = False
         self._sleep()
 
-        # let a command fail
+        # let command fail
         try:
             self.client.set('foo', 'bar', callback=self.stop)
-            self.wait()
+            # self.wait()
         except ConnectionError:
             pass
 
@@ -156,7 +155,7 @@ class DisconnectTestCase(AsyncTestCase):
         self._server.disconnect()
         self.client.listen(handle_message)
         res = yield gen.Wait('disconnect')
-        self.assertEqual(res, {'foo'})
+        self.assertEqual(res, set(['foo']))
         self.assertFalse(self.client.subscribed)
 
         self.stop()

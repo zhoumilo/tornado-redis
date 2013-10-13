@@ -247,8 +247,6 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(res, 'zset')
         self.stop()
 
-    # TODO: zrevrangebyscore
-
     @async_test
     @gen.engine
     def test_rename(self):
@@ -701,15 +699,24 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.zrangebyscore, 'foo', '-inf', '+inf',
                              None, None, False)
         self.assertEqual(res, ['a', 'b', 'c'])
+        res = yield gen.Task(self.client.zrevrangebyscore, 'foo',
+                             '+inf', '-inf', None, None, False)
+        self.assertEqual(res, ['c', 'b', 'a'])
         res = yield gen.Task(self.client.zrangebyscore, 'foo', '2.1', '+inf',
                              None, None, True)
         self.assertEqual(res, [('b', 3.15), ('c', 3.5)])
+        res = yield gen.Task(self.client.zrevrangebyscore, 'foo',
+                             '+inf', '2.1', None, None, True)
+        self.assertEqual(res, [('c', 3.5), ('b', 3.15)])
         res = yield gen.Task(self.client.zrangebyscore, 'foo', '-inf', '3.0',
                              0, 1, False)
         self.assertEqual(res, ['a'])
         res = yield gen.Task(self.client.zrangebyscore, 'foo', '-inf', '+inf',
                              1, 2, False)
         self.assertEqual(res, ['b', 'c'])
+        res = yield gen.Task(self.client.zrevrangebyscore, 'foo',
+                             '+inf', '-inf', 1, 2, False)
+        self.assertEqual(res, ['b', 'a'])
 
         res = yield gen.Task(self.client.delete, 'foo')
         self.assertEqual(res, True)
