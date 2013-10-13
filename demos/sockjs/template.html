@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/> 
+        <title>{{ title }}</title>
+    </head>
+    <body onload="connect()">
+        <h1>{{ title }}</h1>
+        <p>Enter your message and press the 'Send' button. You may open another browser window and send messages from here.</p>
+        <form method="POST" action="/send_message" target="_hidden">
+        	<input name="message" style="width: 500px;border: 1px solid #CCC;padding: 3px;" value="" placeholder="Enter your message here and press the 'Send' button."/>
+        	<input type="submit" value="Post"/>
+        </form>
+        <iframe id="_hidden" style="display:none"></iframe>
+        <h2>Messages</h2>
+        <hr/>
+        <script type="text/javascript" src="//cdn.sockjs.org/sockjs-0.3.min.js"></script>
+        <script>
+        	function connect(){
+        		function display_message(message){
+        			var el = document.createElement('div');
+        			el.innerHTML = message;
+        			document.body.appendChild(el);
+        		}
+
+	            var sockJS = new SockJS("//127.0.0.1:8888/sockjs");
+	            sockJS.onopen = function() {
+	                display_message('Connected.');
+	            };
+	            sockJS.onmessage = function(event) {
+	            	display_message(event.data);
+	            };
+	            sockJS.onclose = function() {
+	            	display_message("Closed.");
+	            };
+        	}
+        </script>
+    </body>
+</html>

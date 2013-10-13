@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import time
 
 from tornado.testing import AsyncTestCase
@@ -71,3 +70,6 @@ class RedisTestCase(AsyncTestCase):
 
     def delayed(self, timeout, cb):
         self.io_loop.add_timeout(time.time() + timeout, cb)
+
+    def pause(self, timeout=0.1, callback=None):
+        self.io_loop.add_timeout(time.time() + timeout, callback)
