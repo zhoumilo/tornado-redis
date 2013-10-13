@@ -1,6 +1,8 @@
 Tornado-Redis
 =============
 
+[![Build Status](https://secure.travis-ci.org/leporo/tornado-redis.png)](https://travis-ci.org/leporo/tornado-redis)
+
 Asynchronous [Redis](http://redis.io/) client for the [Tornado Web Server](http://tornadoweb.org/).
 
 This is a fork of [brükva](https://github.com/evilkost/brukva) redis client
