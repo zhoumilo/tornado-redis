@@ -155,7 +155,7 @@ class DisconnectTestCase(AsyncTestCase):
         self._server.disconnect()
         self.client.listen(handle_message)
         res = yield gen.Wait('disconnect')
-        self.assertEqual(res, {'foo'})
+        self.assertEqual(res, set(['foo']))
         self.assertFalse(self.client.subscribed)
 
         self.stop()

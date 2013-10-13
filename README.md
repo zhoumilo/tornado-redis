@@ -50,57 +50,60 @@ Then execute the following commands in the source directory:
 Usage
 -----
 
-	import tornadoredis
-	import tornado.web
-	import tornado.gen
+```python
+import tornadoredis
+import tornado.web
+import tornado.gen
 
-	...	
-	
-	c = tornadoredis.Client()
-	c.connect()
+...
 
-	...
+c = tornadoredis.Client()
+c.connect()
 
-	class MainHandler(tornado.web.RequestHandler):
-	    @tornado.web.asynchronous
-	    @tornado.gen.engine
-	    def get(self):
-	        foo = yield tornado.gen.Task(c.get, 'foo')
-	        bar = yield tornado.gen.Task(c.get, 'bar')
-	        zar = yield tornado.gen.Task(c.get, 'zar')
-	        self.set_header('Content-Type', 'text/html')
-	        self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
+...
+
+class MainHandler(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def get(self):
+        foo = yield tornado.gen.Task(c.get, 'foo')
+        bar = yield tornado.gen.Task(c.get, 'bar')
+        zar = yield tornado.gen.Task(c.get, 'zar')
+        self.set_header('Content-Type', 'text/html')
+        self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
+```
 
 Pub/Sub
 -------
 
 Tornado-redis comes with helper classes to simplify Pub/Sub implementation.
-The helper classes introduced in tornadoredis.pubsub module use a single redis
+These helper classes introduced in tornadoredis.pubsub module use a single redis
 server connection to handle multiple client and channel subscriptions.
 
 Here is a sample SockJSConnection handler code:
 
-    # Use the synchronous redis client to publish messages to a channel
-    redis_client = redis.Redis()
-    # Create the tornadoredis.Client instance
-    # and use it for redis channel subscriptions
-    subscriber = tornadoredis.pubsub.SockJSSubscriber(tornadoredis.Client())
+```python
+# Use the synchronous redis client to publish messages to a channel
+redis_client = redis.Redis()
+# Create the tornadoredis.Client instance
+# and use it for redis channel subscriptions
+subscriber = tornadoredis.pubsub.SockJSSubscriber(tornadoredis.Client())
 
-    class SubscriptionHandler(sockjs.tornado.SockJSConnection):
-        """
-        SockJS connection handler.
+class SubscriptionHandler(sockjs.tornado.SockJSConnection):
+    """
+    SockJS connection handler.
 
-        Note that there are no "on message" handlers - SockJSSubscriber class
-        calls SockJSConnection.broadcast method to transfer messages
-        to subscribed clients.
-        """
-        def __init__(self, *args, **kwargs):
-            super(MessageHandler, self).__init__(*args, **kwargs)
-            subscriber.subscribe('test_channel', self)
+    Note that there are no "on message" handlers - SockJSSubscriber class
+    calls SockJSConnection.broadcast method to transfer messages
+    to subscribed clients.
+    """
+    def __init__(self, *args, **kwargs):
+        super(MessageHandler, self).__init__(*args, **kwargs)
+        subscriber.subscribe('test_channel', self)
 
-        def on_close(self):
-            subscriber.unsubscribe('test_channel', self)
-
+    def on_close(self):
+        subscriber.unsubscribe('test_channel', self)
+```
 
 See the sockjs application in the demo folder and tornadoredis.pubsub module
 for more implementation details.
@@ -113,15 +116,17 @@ Pipelines correspond to the [Redis transaction feature](http://redis.io/topics/t
 
 Here is a simple example of pipeline feature usage:
 
-    client = Client()
-    # Create a 'Pipeline' to pack a bunldle of Redis commands
-    # and send them to a Redis server in a single request
-    pipe = client.pipeline()
-    # Add commands to a bundle
-    pipe.hset('foo', 'bar', 1)
-    pipe.expire('foo', 60)
-    # Send them to the Redis server and retrieve execution results
-    res_hset, res_expire = yield gen.Task(pipe.execute)
+```python
+client = Client()
+# Create a 'Pipeline' to pack a bunldle of Redis commands
+# and send them to a Redis server in a single request
+pipe = client.pipeline()
+# Add commands to a bundle
+pipe.hset('foo', 'bar', 1)
+pipe.expire('foo', 60)
+# Send them to the Redis server and retrieve execution results
+res_hset, res_expire = yield gen.Task(pipe.execute)
+```
 
 Note that nothing is being sent to the Redis server until the `pipe.execute`
 method call so there is no need to wrap a `pipe.hset` and `pipe.expire`
@@ -136,20 +141,21 @@ To activate it, create the ConnectionPool object instance and pass it
 as connection_pool argument to the Client object:
 
 
-    CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=500,
-                                                  wait_for_available=True)
-    ...
-	class MainHandler(tornado.web.RequestHandler):
-	    @tornado.web.asynchronous
-	    @tornado.gen.engine
-	    def get(self):
-            c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
-            info = yield tornado.gen.Task(c.info)
-            ....
-            # Release the connection to be reused by connection pool.
-            yield tornado.gen.Task(c.disconnect)
-            self.render(....)
-
+```python
+CONNECTION_POOL = tornadoredis.ConnectionPool(max_connections=500,
+                                              wait_for_available=True)
+# ...
+class MainHandler(tornado.web.RequestHandler):
+    @tornado.web.asynchronous
+    @tornado.gen.engine
+    def get(self):
+        c = tornadoredis.Client(connection_pool=CONNECTION_POOL)
+        info = yield tornado.gen.Task(c.info)
+        ....
+        # Release the connection to be reused by connection pool.
+        yield tornado.gen.Task(c.disconnect)
+        self.render(....)
+```
 
 Note that you have to add a `disconnect` method call
 at the end of the code block using the Client instance to release the

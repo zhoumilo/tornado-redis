@@ -1,5 +1,10 @@
 import json
-from collections import Counter, defaultdict
+from collections import defaultdict
+try:
+    from collections import Counter
+except ImportError:
+    # Python 2.6 backport
+    from backports import Counter
 
 from tornado import stack_context
 
