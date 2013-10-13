@@ -71,6 +71,41 @@ Usage
 	        self.set_header('Content-Type', 'text/html')
 	        self.render("template.html", title="Simple demo", foo=foo, bar=bar, zar=zar)
 
+Pub/Sub
+-------
+
+Tornado-redis comes with helper classes to simplify Pub/Sub implementation.
+The helper classes introduced in tornadoredis.pubsub module use a single redis
+server connection to handle multiple client and channel subscriptions.
+
+Here is a sample SockJSConnection handler code:
+
+    # Use the synchronous redis client to publish messages to a channel
+    redis_client = redis.Redis()
+    # Create the tornadoredis.Client instance
+    # and use it for redis channel subscriptions
+    subscriber = tornadoredis.pubsub.SockJSSubscriber(tornadoredis.Client())
+
+    class SubscriptionHandler(sockjs.tornado.SockJSConnection):
+        """
+        SockJS connection handler.
+
+        Note that there are no "on message" handlers - SockJSSubscriber class
+        calls SockJSConnection.broadcast method to transfer messages
+        to subscribed clients.
+        """
+        def __init__(self, *args, **kwargs):
+            super(MessageHandler, self).__init__(*args, **kwargs)
+            subscriber.subscribe('test_channel', self)
+
+        def on_close(self):
+            subscriber.unsubscribe('test_channel', self)
+
+
+See the sockjs application in the demo folder and tornadoredis.pubsub module
+for more implementation details.
+
+
 Using Pipelines
 ---------------
 
@@ -123,6 +158,15 @@ pooled connection (it's to be fixed it future library releases).
 See the [connection pool demo](https://github.com/leporo/tornado-redis/tree/master/demos/connection_pool)
 for an example of the 'connection pool' feature usage.
 
+Note that connection pooling feature has multiple drawbacks and may affect
+your application performance. See the "Tornado-Redis vs Redis-py" note for more
+details.
+
+Please consider using Pub/Sub helper classes implemented in tornadoredis.pubsub
+module or using a similar approach instead of connection polling for
+Pub/Sub operations.
+
+
 Demos
 -----
 
@@ -137,6 +181,10 @@ connection_pool - a 'connection pool' feature demo
 
 websockets - a demo web chat application using WebSockets
  and Redis' [PubSub feature](http://redis.io/topics/pubsub).
+
+sockjs - the same-looking demo web chat application but using the SockJS
+ transport to support  and using the SockJSSubscriber helper class
+ to share a single redis server connection between subscribed clients.
 
 
 Running Tests

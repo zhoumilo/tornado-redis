@@ -44,7 +44,7 @@ class MessageHandler(sockjs.tornado.SockJSConnection):
     SockJS connection handler.
 
     Note that there are no "on message" handlers - SockJSSubscriber class
-    utilizes SockJSConnection.broadcast method to transfer messages
+    calls SockJSConnection.broadcast method to transfer messages
     to subscribed clients.
     """
     def __init__(self, *args, **kwargs):
