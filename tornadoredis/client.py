@@ -1009,8 +1009,7 @@ class Client(object):
         self.subscribed.add(result.channel)
 
     def on_unsubscribed(self, channels, *args, **kwargs):
-        for channel in channels:
-            self.subscribed.remove(channel)
+        self.subscribed -= set(channels)
 
     def unsubscribe(self, channels, callback=None):
         self._unsubscribe('UNSUBSCRIBE', channels, callback=callback)
