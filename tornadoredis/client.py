@@ -980,7 +980,7 @@ class Client(object):
         self._subscribe('PSUBSCRIBE', channels, callback=callback)
 
     def _subscribe(self, cmd, channels, callback=None):
-        if isinstance(channels, str):
+        if isinstance(channels, str) or (not PY3 and isinstance(channels, unicode)):
             channels = [channels]
         if not self.subscribed:
             listen_callback = None
@@ -1018,7 +1018,7 @@ class Client(object):
         self._unsubscribe('PUNSUBSCRIBE', channels, callback=callback)
 
     def _unsubscribe(self, cmd, channels, callback=None):
-        if isinstance(channels, str):
+        if isinstance(channels, str) or (not PY3 and isinstance(channels, unicode)):
             channels = [channels]
         if callback:
             cb = stack_context.wrap(callback)
