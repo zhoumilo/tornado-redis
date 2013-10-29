@@ -196,6 +196,21 @@ class SockJSSubscriberTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_subscribe_unicode(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, u'test.channel', broadcaster)
+        data = {'foo': randint(0, 1000)}
+        self.subscriber.publish(u'test.channel', data, client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        self.assertTrue(broadcaster.messages)
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_unsubscribe(self):
         broadcaster = DummyConnection()
         yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
@@ -207,6 +222,27 @@ class SockJSSubscriberTestCase(RedisTestCase):
 
         data = {'foo': randint(0, 1000)}
         yield gen.Task(self.subscriber.publish, 'test.channel', data,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        self.assertFalse(broadcaster.messages)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_unsubscribe_unicode(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, u'test.channel', broadcaster)
+        self.subscriber.unsubscribe(u'test.channel', broadcaster)
+
+        yield gen.Task(self.pause)
+
+        self.assertFalse(broadcaster.messages)
+
+        data = {'foo': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, u'test.channel', data,
                        client=self.publisher)
 
         yield gen.Task(self.pause)
