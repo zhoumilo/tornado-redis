@@ -1,6 +1,7 @@
 import json
 from random import randint
 from tornado import gen
+from tornado.escape import utf8
 
 from .redistest import RedisTestCase, async_test
 from tornadoredis.pubsub import SockJSSubscriber, SocketIOSubscriber
@@ -190,7 +191,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         yield gen.Task(self.pause)
 
         self.assertTrue(broadcaster.messages)
-        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
 
         self.stop()
 
@@ -205,7 +206,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         yield gen.Task(self.pause)
 
         self.assertTrue(broadcaster.messages)
-        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
 
         self.stop()
 
@@ -272,7 +273,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 3)
         self.assertEqual(len(broadcaster.messages), 2)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[0], json.dumps(data))
+        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
 
         self.subscriber.unsubscribe('test.channel', broadcaster2)
 
@@ -287,7 +288,49 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 4)
         self.assertEqual(len(broadcaster.messages), 3)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[2], json.dumps(data2))
+        self.assertEqual(broadcaster.messages[2], utf8(json.dumps(data2)))
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_subscribe_list(self):
+        broadcaster = DummyConnection()
+        broadcaster2 = DummyConnection()
+        channels = ['test.channel', 'test.channel2']
+        yield gen.Task(self.subscriber.subscribe, channels, broadcaster)
+        yield gen.Task(self.subscriber.subscribe,
+                       ('test.channel', ),
+                       broadcaster2)
+        data = {'foo': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel', data,
+                       client=self.publisher)
+        data2 = {'foo2': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel2', data2,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        msgs = broadcaster.messages + broadcaster2.messages
+        self.assertEqual(len(msgs), 3)
+        self.assertEqual(len(broadcaster.messages), 2)
+        self.assertEqual(len(broadcaster2.messages), 1)
+        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
+
+        self.subscriber.unsubscribe('test.channel', broadcaster2)
+
+        data2 = {'foo': randint(0, 1000)}
+
+        yield gen.Task(self.subscriber.publish, 'test.channel', data2,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        msgs = broadcaster.messages + broadcaster2.messages
+        self.assertEqual(len(msgs), 4)
+        self.assertEqual(len(broadcaster.messages), 3)
+        self.assertEqual(len(broadcaster2.messages), 1)
+        self.assertEqual(broadcaster.messages[2], utf8(json.dumps(data2)))
 
         self.stop()
 

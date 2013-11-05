@@ -8,6 +8,8 @@ a redis channel.
 Please note that this demo is very similar to the 'Websockets' demo but
 utilizes a single redis server connection for all subscribed clients.
 
+Application opens two channel subscriptions for each connected clients: one
+for the broadcast messages and one for private messages, sent to this user.
 
 Running Demo
 ------------

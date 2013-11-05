@@ -7,6 +7,7 @@ except ImportError:
     from backports import Counter
 
 from tornado import stack_context
+from tornado.escape import utf8
 
 
 class BaseSubscriber(object):
@@ -31,25 +32,39 @@ class BaseSubscriber(object):
         The broadcast method of the subscriber object will be called
         for each message received from specified channel.
         Override the on_message method to change this behaviour.
+
+        Arguments:
+        channel_name - channel name or list or tuple of channel names to subscribe for
+        subscriber - a method or object to be used by on_message handler
+        callback - a callback function
         """
-        self.subscribers[channel_name][subscriber] += 1
-        self.subscriber_count[channel_name] += 1
-        if self.subscriber_count[channel_name] == 1:
-            if not self.redis.subscribed:
-                if callback:
-                    callback = stack_context.wrap(callback)
-
-                def _cb(*args, **kwargs):
-                    self.redis.listen(self.on_message)
-                    if callback:
-                        callback(*args, **kwargs)
-
-                cb = _cb
+        if isinstance(channel_name, list) or isinstance(channel_name, tuple):
+            if len(channel_name) > 1:
+                _cb = lambda *args, **kwargs: self.subscribe(channel_name[1:],
+                                                             subscriber,
+                                                             callback=callback)
             else:
-                cb = callback
-            self.redis.subscribe(channel_name, callback=cb)
-        elif callback:
-            callback(True)
+                _cb = callback
+            self.subscribe(channel_name[0], subscriber, callback=_cb)
+        else:
+            self.subscribers[channel_name][subscriber] += 1
+            self.subscriber_count[channel_name] += 1
+            if self.subscriber_count[channel_name] == 1:
+                if not self.redis.subscribed:
+                    if callback:
+                        callback = stack_context.wrap(callback)
+
+                    def _cb(*args, **kwargs):
+                        self.redis.listen(self.on_message)
+                        if callback:
+                            callback(*args, **kwargs)
+
+                    cb = _cb
+                else:
+                    cb = callback
+                self.redis.subscribe(channel_name, callback=cb)
+            elif callback:
+                callback(True)
 
     def unsubscribe(self, channel_name, subscriber):
         """
@@ -128,7 +143,7 @@ class SockJSSubscriber(BaseSubscriber):
             # Get the list of broadcasters for this channel
             broadcasters = list(self.subscribers[msg.channel].keys())
             if broadcasters:
-                broadcasters[0].broadcast(broadcasters, str(msg.body))
+                broadcasters[0].broadcast(broadcasters, utf8(msg.body))
         super(SockJSSubscriber, self).on_message(msg)
 
 
@@ -145,5 +160,5 @@ class SocketIOSubscriber(BaseSubscriber):
             subscribers = list(self.subscribers[msg.channel].keys())
             if subscribers:
                 for subscriber in subscribers:
-                    subscriber.on_message(str(msg.body))
+                    subscriber.on_message(utf8(msg.body))
         super(SocketIOSubscriber, self).on_message(msg)
