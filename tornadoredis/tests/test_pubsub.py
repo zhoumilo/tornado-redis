@@ -1,7 +1,6 @@
 import json
 from random import randint
 from tornado import gen
-from tornado.escape import utf8
 
 from .redistest import RedisTestCase, async_test
 from tornadoredis.pubsub import SockJSSubscriber, SocketIOSubscriber
@@ -191,7 +190,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         yield gen.Task(self.pause)
 
         self.assertTrue(broadcaster.messages)
-        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
 
         self.stop()
 
@@ -206,7 +205,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         yield gen.Task(self.pause)
 
         self.assertTrue(broadcaster.messages)
-        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
 
         self.stop()
 
@@ -273,7 +272,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 3)
         self.assertEqual(len(broadcaster.messages), 2)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
 
         self.subscriber.unsubscribe('test.channel', broadcaster2)
 
@@ -288,7 +287,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 4)
         self.assertEqual(len(broadcaster.messages), 3)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[2], utf8(json.dumps(data2)))
+        self.assertEqual(broadcaster.messages[2], json.dumps(data2))
 
         self.stop()
 
@@ -315,7 +314,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 3)
         self.assertEqual(len(broadcaster.messages), 2)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[0], utf8(json.dumps(data)))
+        self.assertEqual(broadcaster.messages[0], json.dumps(data))
 
         self.subscriber.unsubscribe('test.channel', broadcaster2)
 
@@ -330,7 +329,7 @@ class SockJSSubscriberTestCase(RedisTestCase):
         self.assertEqual(len(msgs), 4)
         self.assertEqual(len(broadcaster.messages), 3)
         self.assertEqual(len(broadcaster2.messages), 1)
-        self.assertEqual(broadcaster.messages[2], utf8(json.dumps(data2)))
+        self.assertEqual(broadcaster.messages[2], json.dumps(data2))
 
         self.stop()
 

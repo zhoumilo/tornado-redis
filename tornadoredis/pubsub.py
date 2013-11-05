@@ -143,7 +143,7 @@ class SockJSSubscriber(BaseSubscriber):
             # Get the list of broadcasters for this channel
             broadcasters = list(self.subscribers[msg.channel].keys())
             if broadcasters:
-                broadcasters[0].broadcast(broadcasters, utf8(msg.body))
+                broadcasters[0].broadcast(broadcasters, str(msg.body))
         super(SockJSSubscriber, self).on_message(msg)
 
 
@@ -160,5 +160,5 @@ class SocketIOSubscriber(BaseSubscriber):
             subscribers = list(self.subscribers[msg.channel].keys())
             if subscribers:
                 for subscriber in subscribers:
-                    subscriber.on_message(utf8(msg.body))
+                    subscriber.on_message(str(msg.body))
         super(SocketIOSubscriber, self).on_message(msg)
