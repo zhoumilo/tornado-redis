@@ -1024,8 +1024,6 @@ class Client(object):
             cb = stack_context.wrap(callback)
 
             callback = cb
-        else:
-            callback = partial(self.on_unsubscribed, channels)
         self.execute_command(cmd, *channels, callback=callback)
 
     def publish(self, channel, message, callback=None):

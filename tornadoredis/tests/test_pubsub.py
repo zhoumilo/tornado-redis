@@ -253,6 +253,31 @@ class SockJSSubscriberTestCase(RedisTestCase):
 
     @async_test
     @gen.engine
+    def test_sequental_subscribe(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+        yield gen.Task(self.subscriber.subscribe, 'test.channel2', broadcaster)
+        self.subscriber.unsubscribe(u'test.channel2', broadcaster)
+        self.subscriber.unsubscribe(u'test.channel', broadcaster)
+        yield gen.Task(self.pause)
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+
+        yield gen.Task(self.pause)
+
+        self.assertFalse(broadcaster.messages)
+
+        data = {'foo': randint(0, 1000)}
+        yield gen.Task(self.subscriber.publish, 'test.channel', data,
+                       client=self.publisher)
+
+        yield gen.Task(self.pause)
+
+        self.assertTrue(broadcaster.messages)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
     def test_subscribe_multiple(self):
         broadcaster = DummyConnection()
         broadcaster2 = DummyConnection()
