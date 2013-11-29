@@ -210,7 +210,7 @@ class Client(object):
     def __init__(self, host='localhost', port=6379, unix_socket_path=None,
                  password=None, selected_db=None, io_loop=None,
                  connection_pool=None):
-        self._io_loop = io_loop or IOLoop.instance()
+        self._io_loop = io_loop or IOLoop.current()
         self._connection_pool = connection_pool
         self._weak = weakref.proxy(self)
         if connection_pool:
