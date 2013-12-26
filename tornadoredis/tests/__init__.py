@@ -5,3 +5,4 @@ from .test_pipeline import *
 from .test_scripting import *
 from .test_reconnect import *
 from .test_pool import *
+from .test_locks import *
