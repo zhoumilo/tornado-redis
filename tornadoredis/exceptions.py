@@ -42,3 +42,8 @@ class ResponseError(RedisError):
 
 class InvalidResponse(RedisError):
     pass
+
+class LockError(RedisError):
+    "Errors thrown from the Lock"
+    pass
+

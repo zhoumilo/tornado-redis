@@ -1115,6 +1115,30 @@ class Client(object):
     def unwatch(self, callback=None):
         self.execute_command('UNWATCH', callback=callback)
 
+    ### LOCKS
+    def lock(self, lock_name, lock_ttl=None, polling_interval=0.1):
+        """
+        Create a new Lock object using the Redis key ``lock_name`` for
+        state, that behaves like a threading.Lock. 
+
+        This method is synchronous, and returns immediately with the Lock object.        
+        This method doesn't acquire the Lock or in fact trigger any sort of
+        communications with the Redis server. This must be done using the Lock
+        object itself.
+
+        If specified, ``lock_ttl`` indicates the maximum life time for the lock.
+        If none is specified, it will remain locked until release() is called.
+
+        ``polling_interval`` indicates the time between acquire attempts (polling)
+        when the lock is in blocking mode and another client is currently
+        holding the lock.
+
+        Note: If using ``lock_ttl``, you should make sure all the hosts
+        that are running clients have their time synchronized with a network
+        time service like ntp.
+        """
+        return Lock(self, lock_name, lock_ttl=lock_ttl, polling_interval=polling_interval)
+
     ### SCRIPTING COMMANDS
     def eval(self, script, keys=None, args=None, callback=None):
         if keys is None:
@@ -1269,3 +1293,146 @@ class Pipeline(Client):
             self.executing = False
 
         callback(results)
+
+class Lock(object):
+    """
+    A shared, distributed Lock that uses a Redis server to hold its state.
+    This Lock can be shared across processes and/or machines. It works 
+    asynchronously and plays nice with the Tornado IOLoop.
+    """
+
+    LOCK_FOREVER = float(2 ** 31 + 1)  # 1 past max unix time
+
+    def __init__(self, redis_client, lock_name, lock_ttl=None, polling_interval=0.1):
+        """
+        Create a new Lock object using the Redis key ``lock_name`` for
+        state, that behaves like a threading.Lock. 
+
+        This method is synchronous, and returns immediately. It doesn't acquire the
+        Lock or in fact trigger any sort of communications with the Redis server. 
+        This must be done using the Lock object itself.
+
+        If specified, ``lock_ttl`` indicates the maximum life time for the lock.
+        If none is specified, it will remain locked until release() is called.
+
+        ``polling_interval`` indicates the time between acquire attempts (polling)
+        when the lock is in blocking mode and another client is currently
+        holding the lock.
+
+        Note: If using ``lock_ttl``, you should make sure all the hosts
+        that are running clients have their time synchronized with a network
+        time service like ntp.
+        """
+        self.redis_client = redis_client
+        self.lock_name = lock_name
+        self.acquired_until = None
+        self.lock_ttl = lock_ttl
+        self.polling_interval = polling_interval
+        if self.lock_ttl and self.polling_interval > self.lock_ttl:
+            raise LockError("'polling_interval' must be less than 'lock_ttl'")
+
+    @gen.engine
+    def acquire(self, blocking=True, callback=None):
+        """
+        Acquire the lock.
+        Returns True once the lock is acquired.
+
+        If ``blocking`` is False, always return immediately. If the lock
+        was acquired, return True, otherwise return False.
+        Otherwise, block until the lock is acquired (or an error occurs).
+
+        If ``callback`` is supplied, it is called with the result.
+        """
+
+        # Loop until we have a conclusive result
+        while 1:
+
+            # Get the current time
+            unixtime = int(mod_time.time())
+
+            # If the lock has a limited lifetime, create a timeout value
+            if self.lock_ttl:
+                timeout_at = unixtime + self.lock_ttl
+            # Otherwise, set the timeout value at forever (dangerous)
+            else:
+                timeout_at = Lock.LOCK_FOREVER
+            timeout_at = float(timeout_at)
+
+            # Try and get the lock, setting the timeout value in the appropriate key, 
+            # but only if a previous value does not exist in Redis
+            result = yield gen.Task(self.redis_client.setnx, self.lock_name, timeout_at)
+
+            # If we managed to get the lock
+            if result:
+
+                # We successfully acquired the lock!
+                self.acquired_until = timeout_at
+                if callback:
+                    callback(True)
+                return
+                
+            # We didn't get the lock, another value is already there
+            # Check to see if the current lock timeout value has already expired
+            result = yield gen.Task(self.redis_client.get, self.lock_name)
+            existing = float(result or 1)
+
+            # Has it expired?
+            if existing < unixtime:
+
+                # The previous lock is expired. We attempt to overwrite it, getting the current value
+                # in the server, just in case someone tried to get the lock at the same time
+                result = yield gen.Task(self.redis_client.getset, 
+                                        self.lock_name, 
+                                        timeout_at)
+                existing = float(result or 1)
+
+                # If the value we read is older than our own current timestamp, we managed to get the
+                # lock with no issues - the timeout has indeed expired
+                if existing < unixtime:
+
+                    # We successfully acquired the lock!
+                    self.acquired_until = timeout_at
+                    if callback:
+                        callback(True)
+                    return
+
+                # However, if we got here, then the value read from the Redis server is newer than
+                # our own current timestamp - meaning someone already got the lock before us.
+                # We failed getting the lock.
+
+            # If we are not signalled to block
+            if not blocking:
+
+                # We failed acquiring the lock...
+                if callback:
+                    callback(False)
+                return
+
+            # Otherwise, we "sleep" for an amount of time equal to the polling interval, after which
+            # we will try getting the lock again.
+            yield gen.Task(self.redis_client._io_loop.add_timeout, 
+                           self.redis_client._io_loop.time() + self.polling_interval)
+
+    @gen.engine
+    def release(self, callback=None):
+        """
+        Releases the already acquired lock.
+
+        If ``callback`` is supplied, it is called with True when finished.
+        """
+
+        if self.acquired_until is None:
+            raise ValueError("Cannot release an unlocked lock")
+
+        # Get the current lock value
+        result = yield gen.Task(self.redis_client.get, self.lock_name)
+        existing = float(result or 1)
+        
+        # If the lock time is in the future, delete the lock
+        if existing >= self.acquired_until:
+            yield gen.Task(self.redis_client.delete, self.lock_name)            
+        self.acquired_until = None
+
+        # That is it.
+        if callback:            
+            callback(True)
