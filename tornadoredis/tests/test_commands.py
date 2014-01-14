@@ -7,6 +7,7 @@ from tornado import gen
 
 from .redistest import RedisTestCase, async_test
 
+SCAN_BUF_SIZE = 200
 
 class ServerCommandsTestCase(RedisTestCase):
 
@@ -1033,6 +1034,78 @@ class ServerCommandsTestCase(RedisTestCase):
         res = yield gen.Task(self.client.get, 'foo')
         self.assertEqual(res, 'bar')
 
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_scan(self):
+        yield [gen.Task(self.client.set, 'test{}'.format(i), 'test') for i in xrange(SCAN_BUF_SIZE)]
+        cursor = None
+        all_keys = set()
+        while cursor != 0:
+            res = yield gen.Task(self.client.scan, cursor or 0)
+            self.assertEqual(len(res), 2)
+            cursor, keys = res
+            self.assertTrue(isinstance(cursor, int))
+            self.assertTrue(isinstance(keys, set))
+            all_keys.update(keys)
+        for i in xrange(SCAN_BUF_SIZE):
+            self.assertTrue('test{}'.format(i) in all_keys)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_sscan(self):
+        yield [gen.Task(self.client.sadd, 'scanset', 'test{}'.format(i)) for i in xrange(SCAN_BUF_SIZE)]
+        cursor = None
+        all_keys = set()
+        while cursor != 0:
+            res = yield gen.Task(self.client.sscan, 'scanset', cursor or 0)
+            self.assertEqual(len(res), 2)
+            cursor, keys = res
+            self.assertTrue(isinstance(cursor, int))
+            self.assertTrue(isinstance(keys, set))
+            all_keys.update(keys)
+        for i in xrange(SCAN_BUF_SIZE):
+            self.assertTrue('test{}'.format(i) in all_keys)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_hscan(self):
+        yield [gen.Task(self.client.hset, 'scanhash', 'test{}'.format(i), 'test') for i in xrange(SCAN_BUF_SIZE)]
+        cursor = None
+        all_keys = set()
+        while cursor != 0:
+            res = yield gen.Task(self.client.hscan, 'scanhash', cursor or 0)
+            self.assertEqual(len(res), 2)
+            cursor, keys = res
+            self.assertTrue(isinstance(cursor, int))
+            self.assertTrue(isinstance(keys, set))
+            all_keys.update(keys)
+        for i in xrange(SCAN_BUF_SIZE):
+            self.assertTrue('test{}'.format(i) in all_keys)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_zscan(self):
+        yield [gen.Task(self.client.zadd, 'scanzset', i, 'test{}'.format(i)) for i in xrange(SCAN_BUF_SIZE)]
+        cursor = None
+        all_pairs = []
+        while cursor != 0:
+            res = yield gen.Task(self.client.zscan, 'scanzset', cursor or 0)
+            self.assertEqual(len(res), 2)
+            cursor, pairs = res
+            self.assertTrue(isinstance(cursor, int))
+            self.assertTrue(isinstance(pairs, list))
+            all_pairs.extend(pairs)
+        for i in xrange(SCAN_BUF_SIZE):
+            pair = ('test{}'.format(i), i)
+            self.assertTrue(pair in all_pairs, "{} not in {}".format(pair, all_pairs))
         self.stop()
 
     @async_test

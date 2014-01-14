@@ -106,8 +106,13 @@ def reply_pubsub_message(r, *args, **kwargs):
 
 
 def reply_zset(r, *args, **kwargs):
-    if (not r) or (not 'WITHSCORES' in args):
+    if r and 'WITHSCORES' in args:
+        return reply_zset_withscores(r, *args, **kwargs)
+    else:
         return r
+
+
+def reply_zset_withscores(r, *args, **kwargs):
     return list(zip(r[::2], list(map(reply_number, r[1::2]))))
 
 
@@ -143,6 +148,14 @@ def reply_info(response, *args):
 
 def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
+
+
+def reply_map(*funcs):
+    def reply_fn(r, *args, **kwargs):
+        if len(funcs) != len(r):
+            raise ValueError('more results than functions to map')
+        return [f(part) for f, part in zip(funcs, r)]
+    return reply_fn
 
 
 def to_list(source):
@@ -193,13 +206,16 @@ REPLY_MAP = dict_merge(
                         reply_zset),
     string_keys_to_dict('ZSCORE ZINCRBY',
                         reply_number),
+    string_keys_to_dict('SCAN HSCAN SSCAN',
+                        reply_map(reply_int, reply_set)),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),
      'LASTSAVE': reply_datetime,
      'TTL': reply_ttl,
      'INFO': reply_info,
      'MULTI_PART': make_reply_assert_msg('QUEUED'),
-     'TIME': lambda x: (int(x[0]), int(x[1]))}
+     'TIME': lambda x: (int(x[0]), int(x[1])),
+     'ZSCAN': reply_map(reply_int, reply_zset_withscores)}
 )
 
 
@@ -971,6 +987,27 @@ class Client(object):
 
     def hvals(self, key, callback=None):
         self.execute_command('HVALS', key, callback=callback)
+
+    ### SCAN COMMANDS
+    def scan(self, cursor, count=None, match=None, callback=None):
+        self._scan('SCAN', cursor, count, match, callback)
+
+    def hscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('HSCAN', cursor, count, match, callback, key=key)
+
+    def sscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('SSCAN', cursor, count, match, callback, key=key)
+
+    def zscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('ZSCAN', cursor, count, match, callback, key=key)
+
+    def _scan(self, cmd, cursor, count, match, callback, key=None):
+        tokens = [cmd]
+        key and tokens.append(key)
+        tokens.append(cursor)
+        match and tokens.extend(['MATCH', match])
+        count and tokens.extend(['COUNT', count])
+        self.execute_command(*tokens, callback=callback)
 
     ### PUBSUB
     def subscribe(self, channels, callback=None):
