@@ -182,7 +182,7 @@ class ConnectionPool(object):
                  **connection_kwargs):
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections or 2048
-        self.wait_for_avaliable = wait_for_available
+        self.wait_for_available = wait_for_available
         self._created_connections = 0
         self._available_connections = set()
         self._in_use_connections = set()
@@ -199,7 +199,7 @@ class ConnectionPool(object):
         if connection:
             connection._event_handler = event_handler_ref
             self._in_use_connections.add(connection)
-        elif self.wait_for_avaliable:
+        elif self.wait_for_available:
             connection = self.make_proxy(client_proxy=event_handler_ref)
         else:
             raise ConnectionError("Too many connections")
