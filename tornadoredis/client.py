@@ -106,8 +106,13 @@ def reply_pubsub_message(r, *args, **kwargs):
 
 
 def reply_zset(r, *args, **kwargs):
-    if (not r) or (not 'WITHSCORES' in args):
+    if r and 'WITHSCORES' in args:
+        return reply_zset_withscores(r, *args, **kwargs)
+    else:
         return r
+
+
+def reply_zset_withscores(r, *args, **kwargs):
     return list(zip(r[::2], list(map(reply_number, r[1::2]))))
 
 
@@ -143,6 +148,14 @@ def reply_info(response, *args):
 
 def reply_ttl(r, *args, **kwargs):
     return r != -1 and r or None
+
+
+def reply_map(*funcs):
+    def reply_fn(r, *args, **kwargs):
+        if len(funcs) != len(r):
+            raise ValueError('more results than functions to map')
+        return [f(part) for f, part in zip(funcs, r)]
+    return reply_fn
 
 
 def to_list(source):
@@ -193,13 +206,16 @@ REPLY_MAP = dict_merge(
                         reply_zset),
     string_keys_to_dict('ZSCORE ZINCRBY',
                         reply_number),
+    string_keys_to_dict('SCAN HSCAN SSCAN',
+                        reply_map(reply_int, reply_set)),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),
      'LASTSAVE': reply_datetime,
      'TTL': reply_ttl,
      'INFO': reply_info,
      'MULTI_PART': make_reply_assert_msg('QUEUED'),
-     'TIME': lambda x: (int(x[0]), int(x[1]))}
+     'TIME': lambda x: (int(x[0]), int(x[1])),
+     'ZSCAN': reply_map(reply_int, reply_zset_withscores)}
 )
 
 
@@ -972,6 +988,27 @@ class Client(object):
     def hvals(self, key, callback=None):
         self.execute_command('HVALS', key, callback=callback)
 
+    ### SCAN COMMANDS
+    def scan(self, cursor, count=None, match=None, callback=None):
+        self._scan('SCAN', cursor, count, match, callback)
+
+    def hscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('HSCAN', cursor, count, match, callback, key=key)
+
+    def sscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('SSCAN', cursor, count, match, callback, key=key)
+
+    def zscan(self, key, cursor, count=None, match=None, callback=None):
+        self._scan('ZSCAN', cursor, count, match, callback, key=key)
+
+    def _scan(self, cmd, cursor, count, match, callback, key=None):
+        tokens = [cmd]
+        key and tokens.append(key)
+        tokens.append(cursor)
+        match and tokens.extend(['MATCH', match])
+        count and tokens.extend(['COUNT', count])
+        self.execute_command(*tokens, callback=callback)
+
     ### PUBSUB
     def subscribe(self, channels, callback=None):
         self._subscribe('SUBSCRIBE', channels, callback=callback)
@@ -1119,9 +1156,9 @@ class Client(object):
     def lock(self, lock_name, lock_ttl=None, polling_interval=0.1):
         """
         Create a new Lock object using the Redis key ``lock_name`` for
-        state, that behaves like a threading.Lock. 
+        state, that behaves like a threading.Lock.
 
-        This method is synchronous, and returns immediately with the Lock object.        
+        This method is synchronous, and returns immediately with the Lock object.
         This method doesn't acquire the Lock or in fact trigger any sort of
         communications with the Redis server. This must be done using the Lock
         object itself.
@@ -1297,7 +1334,7 @@ class Pipeline(Client):
 class Lock(object):
     """
     A shared, distributed Lock that uses a Redis server to hold its state.
-    This Lock can be shared across processes and/or machines. It works 
+    This Lock can be shared across processes and/or machines. It works
     asynchronously and plays nice with the Tornado IOLoop.
     """
 
@@ -1306,10 +1343,10 @@ class Lock(object):
     def __init__(self, redis_client, lock_name, lock_ttl=None, polling_interval=0.1):
         """
         Create a new Lock object using the Redis key ``lock_name`` for
-        state, that behaves like a threading.Lock. 
+        state, that behaves like a threading.Lock.
 
         This method is synchronous, and returns immediately. It doesn't acquire the
-        Lock or in fact trigger any sort of communications with the Redis server. 
+        Lock or in fact trigger any sort of communications with the Redis server.
         This must be done using the Lock object itself.
 
         If specified, ``lock_ttl`` indicates the maximum life time for the lock.
@@ -1358,7 +1395,7 @@ class Lock(object):
                 timeout_at = Lock.LOCK_FOREVER
             timeout_at = float(timeout_at)
 
-            # Try and get the lock, setting the timeout value in the appropriate key, 
+            # Try and get the lock, setting the timeout value in the appropriate key,
             # but only if a previous value does not exist in Redis
             result = yield gen.Task(self.redis_client.setnx, self.lock_name, timeout_at)
 
@@ -1370,7 +1407,7 @@ class Lock(object):
                 if callback:
                     callback(True)
                 return
-                
+
             # We didn't get the lock, another value is already there
             # Check to see if the current lock timeout value has already expired
             result = yield gen.Task(self.redis_client.get, self.lock_name)
@@ -1381,8 +1418,8 @@ class Lock(object):
 
                 # The previous lock is expired. We attempt to overwrite it, getting the current value
                 # in the server, just in case someone tried to get the lock at the same time
-                result = yield gen.Task(self.redis_client.getset, 
-                                        self.lock_name, 
+                result = yield gen.Task(self.redis_client.getset,
+                                        self.lock_name,
                                         timeout_at)
                 existing = float(result or 1)
 
@@ -1410,7 +1447,7 @@ class Lock(object):
 
             # Otherwise, we "sleep" for an amount of time equal to the polling interval, after which
             # we will try getting the lock again.
-            yield gen.Task(self.redis_client._io_loop.add_timeout, 
+            yield gen.Task(self.redis_client._io_loop.add_timeout,
                            self.redis_client._io_loop.time() + self.polling_interval)
 
     @gen.engine
@@ -1427,12 +1464,12 @@ class Lock(object):
         # Get the current lock value
         result = yield gen.Task(self.redis_client.get, self.lock_name)
         existing = float(result or 1)
-        
+
         # If the lock time is in the future, delete the lock
         if existing >= self.acquired_until:
-            yield gen.Task(self.redis_client.delete, self.lock_name)            
+            yield gen.Task(self.redis_client.delete, self.lock_name)
         self.acquired_until = None
 
         # That is it.
-        if callback:            
+        if callback:
             callback(True)
