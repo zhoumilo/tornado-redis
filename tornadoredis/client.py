@@ -3,7 +3,7 @@ import sys
 from functools import partial
 import collections
 
-from collections import namedtuple, deque, defaultdict
+from collections import namedtuple, deque
 import logging
 import weakref
 import datetime
@@ -12,7 +12,7 @@ import time as mod_time
 from tornado.ioloop import IOLoop
 from tornado import gen
 from tornado import stack_context
-from tornado.escape import utf8, to_unicode, to_basestring
+from tornado.escape import to_unicode, to_basestring
 
 from .exceptions import RequestError, ConnectionError, ResponseError
 from .connection import Connection
@@ -240,6 +240,7 @@ class Client(object):
         self.connection = connection
         self.subscribed = set()
         self.subscribe_callbacks = deque()
+        self.unsubscribe_callbacks = []
         self.password = password
         self.selected_db = selected_db or 0
         self._pipeline = None
@@ -390,7 +391,8 @@ class Client(object):
         execute_pending = cmd not in ('AUTH', 'SELECT')
 
         callback = kwargs.get('callback', None)
-        del kwargs['callback']
+        if 'callback' in kwargs:
+            del kwargs['callback']
         cmd_line = CmdLine(cmd, *args, **kwargs)
         if callback and self.subscribed and cmd not in PUB_SUB_COMMANDS:
             callback(RequestError(
@@ -1060,7 +1062,12 @@ class Client(object):
         self.subscribed.add(result.channel)
 
     def on_unsubscribed(self, channels, *args, **kwargs):
-        self.subscribed -= set(channels)
+        channels = set(channels)
+        self.subscribed -= channels
+        for cb_channels, cb in self.unsubscribe_callbacks:
+            cb_channels.difference_update(channels)
+            if not cb_channels:
+                self._io_loop.add_callback(cb)
 
     def unsubscribe(self, channels, callback=None):
         self._unsubscribe('UNSUBSCRIBE', channels, callback=callback)
@@ -1073,9 +1080,10 @@ class Client(object):
             channels = [channels]
         if callback:
             cb = stack_context.wrap(callback)
-
-            callback = cb
-        self.execute_command(cmd, *channels, callback=callback)
+            # TODO: Do we need to back this up with self._io_loop.add_timeout(time() + 1, cb)?
+            # FIXME: What about PUNSUBSCRIBEs?
+            self.unsubscribe_callbacks.append((set(channels), cb))
+        self.execute_command(cmd, *channels)
 
     def publish(self, channel, message, callback=None):
         self.execute_command('PUBLISH', channel, message, callback=callback)

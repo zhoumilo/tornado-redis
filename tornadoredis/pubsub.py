@@ -140,10 +140,10 @@ class SockJSSubscriber(BaseSubscriber):
         if not msg:
             return
         if msg.kind == 'message' and msg.body:
-            # Get the list of broadcasters for this channel
-            broadcasters = list(self.subscribers[msg.channel].keys())
-            if broadcasters:
-                broadcasters[0].broadcast(broadcasters, str(msg.body))
+            # Get the list of subscribers for this channel
+            subscribers = list(self.subscribers[msg.channel].keys())
+            if subscribers:
+                subscribers[0].broadcast(subscribers, str(msg.body))
         super(SockJSSubscriber, self).on_message(msg)
 
 
