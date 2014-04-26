@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 import random
-from datetime import datetime, timedelta
 import time as mod_time
+
+from datetime import datetime, timedelta
+from functools import partial
 
 from tornado import gen
 
@@ -27,8 +29,42 @@ class ServerCommandsTestCase(RedisTestCase):
     @async_test
     @gen.engine
     def test_set(self):
+        # basic test
         res = yield gen.Task(self.client.set, 'foo', 'bar')
         self.assertEqual(res, True)
+
+        # test key expiration in milliseconds
+        res = yield gen.Task(self.client.set, 'foo1', 'bar1', pexpire=10)
+        self.assertEqual(res, True)
+        yield gen.Task(self.io_loop.add_timeout, mod_time.time() + 0.015)
+        res = yield gen.Task(self.client.get, 'foo1')
+        self.assertEqual(res, None)
+
+        # test key expiration in seconds
+        res = yield gen.Task(self.client.set, 'foo2', 'bar2', expire=1)
+        self.assertEqual(res, True)
+        yield gen.Task(self.io_loop.add_timeout, mod_time.time() + 1.001)
+        res = yield gen.Task(self.client.get, 'foo2')
+        self.assertEqual(res, None)
+
+        # test set only_if_not_exists
+        res = yield gen.Task(self.client.set, 'foo3', 'bar3', only_if_not_exists=True)
+        self.assertEqual(res, True)
+        res = yield gen.Task(self.client.set, 'foo3', 'bar3', only_if_not_exists=True)
+        self.assertEqual(res, False)
+
+        # test set only_if_exists
+        res = yield gen.Task(self.client.set, 'foo3', 'only_if_exists', only_if_exists=True)
+        get_res = yield gen.Task(self.client.get, 'foo3')
+        self.assertEqual(res, True)
+        self.assertEqual(get_res, 'only_if_exists')
+        res = yield gen.Task(self.client.set, 'foo4', 'bar4', only_if_exists=True)
+        self.assertEqual(res, False)
+
+        # test exception in case only_if_exists and only_if_not_exists
+        # enabled in same time
+        f = partial(self.client.set, 'f', 'b', only_if_exists=True, only_if_not_exists=True)
+        self.assertRaises(ValueError, f)
         self.stop()
 
     @async_test
