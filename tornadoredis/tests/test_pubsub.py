@@ -1,3 +1,4 @@
+# coding=utf-8
 import json
 from random import randint
 from tornado import gen
@@ -207,6 +208,21 @@ class SockJSSubscriberTestCase(RedisTestCase):
 
         self.assertTrue(broadcaster.messages)
         self.assertEqual(broadcaster.messages[0], json.dumps(data))
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_publish_unicode(self):
+        broadcaster = DummyConnection()
+        yield gen.Task(self.subscriber.subscribe, 'test.channel', broadcaster)
+        data = u'лабуда-ерунда'
+        self.publisher.publish('test.channel', data)
+
+        yield gen.Task(self.pause)
+
+        self.assertTrue(broadcaster.messages)
+        self.assertEqual(broadcaster.messages[0], data)
 
         self.stop()
 

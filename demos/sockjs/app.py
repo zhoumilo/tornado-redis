@@ -92,7 +92,7 @@ class MessageHandler(sockjs.tornado.SockJSConnection):
             choice(['Smith', 'Doe', 'Strong', 'Long', 'Tall', 'Small']))
         # Send it to user
         self._send_message('uid', self.user_name, self.user_id)
-        # Subscribe to broadcast and 'private' message channels
+        # Subscribe to 'broadcast' and 'private' message channels
         subscriber.subscribe(['broadcast_channel',
                               'private.{}'.format(self.user_id)],
                              self)
@@ -115,6 +115,6 @@ application = tornado.web.Application(
 if __name__ == '__main__':
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8888)
-    print('Demo is runing at 0.0.0.0:8888\n'
+    print('Demo is running at 0.0.0.0:8888\n'
           'Quit the demo with CONTROL-C')
     tornado.ioloop.IOLoop.instance().start()

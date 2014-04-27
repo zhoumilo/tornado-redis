@@ -100,14 +100,12 @@ class DisconnectTestCase(AsyncTestCase):
         self.wait()
 
     def test_reconnect(self):
-        def _test_send():
-            self.client.set('foo', 'bar', callback=self.stop)
-            self.wait()
-
-        _test_send()
+        self.client.set('foo', 'bar', callback=self.stop)
+        self.wait()
         self._server.disconnect()
         self._sleep()
-        _test_send()
+        self.client.set('foo', 'bar', callback=self.stop)
+        self.wait()
 
     def test_reconnect_db(self):
         # let select/flushdb happen
