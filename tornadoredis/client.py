@@ -647,8 +647,22 @@ class Client(object):
     def delete(self, *keys, **kwargs):
         self.execute_command('DEL', *keys, callback=kwargs.get('callback'))
 
-    def set(self, key, value, callback=None):
-        self.execute_command('SET', key, value, callback=callback)
+    def set(self, key, value, expire=None, pexpire=None,
+            only_if_not_exists=False, only_if_exists=False, callback=None):
+        args = []
+        if expire is not None:
+            args.extend(("EX", expire))
+        if pexpire is not None:
+            args.extend(("PX", pexpire))
+        if only_if_not_exists and only_if_exists:
+            raise ValueError("only_if_not_exists and only_if_exists "
+                             "cannot be true simultaneously")
+        if only_if_not_exists:
+            args.append("NX")
+        if only_if_exists:
+            args.append("XX")
+
+        self.execute_command('SET', key, value, *args, callback=callback)
 
     def setex(self, key, ttl, value, callback=None):
         self.execute_command('SETEX', key, ttl, value, callback=callback)
