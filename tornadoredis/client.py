@@ -1205,9 +1205,9 @@ class Client(object):
         if args is None:
             args = []
         num_keys = len(keys)
-        keys.extend(args)
+        _args = keys + args
         self.execute_command('EVAL', script, num_keys,
-                             *keys, callback=callback)
+                             *_args, callback=callback)
 
     def evalsha(self, shahash, keys=None, args=None, callback=None):
         if keys is None:
