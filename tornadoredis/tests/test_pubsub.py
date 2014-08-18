@@ -1,4 +1,5 @@
 # coding=utf-8
+from collections import namedtuple
 import json
 from random import randint
 from tornado import gen
@@ -155,6 +156,7 @@ class DummyConnection(object):
 
     def __init__(self):
         self.messages = []
+        self.session = namedtuple('FakeSession', ['is_closed'])(is_closed=False)
 
     def broadcast(self, clients, message):
         for client in clients:

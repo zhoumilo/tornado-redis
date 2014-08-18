@@ -143,7 +143,12 @@ class SockJSSubscriber(BaseSubscriber):
             # Get the list of subscribers for this channel
             subscribers = list(self.subscribers[msg.channel].keys())
             if subscribers:
-                subscribers[0].broadcast(subscribers, msg.body)
+                # Use the first active subscriber/client connection
+                # for broadcasting. Thanks to Jonas Hagstedt
+                for s in subscribers:
+                    if not s.session.is_closed:
+                        s.broadcast(subscribers, msg.body)
+                        break
         super(SockJSSubscriber, self).on_message(msg)
 
 
