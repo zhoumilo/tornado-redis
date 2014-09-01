@@ -114,7 +114,7 @@ class BaseSubscriber(object):
         Clears subscriber lists and counters.
         """
         for channel_name, subscribers in self.subscriber_count.items():
-            if subscribers:
+            if subscribers and self.redis.connection.connected():
                 self.redis.unsubscribe(channel_name)
         self.subscribers = defaultdict(Counter)
         self.subscriber_count = Counter()
