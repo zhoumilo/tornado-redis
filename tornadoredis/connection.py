@@ -67,10 +67,11 @@ class Connection(object):
                     sock.settimeout(self.timeout)
                     sock.connect(self.unix_socket_path)
                 else:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+                    sock = socket.create_connection(
+                        (self.host, self.port),
+                        timeout=self.timeout
+                    )
                     sock.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
-                    sock.settimeout(self.timeout)
-                    sock.connect((self.host, self.port))
                 self._stream = IOStream(sock, io_loop=self._io_loop)
                 self._stream.set_close_callback(self.on_stream_close)
                 self.info['db'] = 0
