@@ -6,3 +6,4 @@ from .test_scripting import *
 from .test_reconnect import *
 from .test_pool import *
 from .test_locks import *
+from .test_ipv6 import *
