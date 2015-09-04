@@ -1053,6 +1053,9 @@ class ServerCommandsTestCase(RedisTestCase):
         self.assertEqual(t, 'int')
         yield gen.Task(self.client.set, 'foo', 's')
         t = yield gen.Task(self.client.object, 'encoding', 'foo')
+        self.assertEqual(t, 'embstr')
+        yield gen.Task(self.client.set, 'foo', 'Long, long, long ago there lived a king ...')
+        t = yield gen.Task(self.client.object, 'encoding', 'foo')
         self.assertEqual(t, 'raw')
 
         self.stop()
