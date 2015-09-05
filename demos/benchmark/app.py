@@ -1,3 +1,7 @@
+from __future__ import print_function
+
+import sys
+
 import tornadoredis
 import tornado.httpserver
 import tornado.web
@@ -6,6 +10,10 @@ import tornado.gen
 import logging
 
 import redis
+
+PY3 = sys.version > '3'
+if PY3:
+    xrange = range
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -92,12 +100,12 @@ if __name__ == '__main__':
     # Start the data initialization routine
     http_server = tornado.httpserver.HTTPServer(application)
     http_server.listen(8888)
-    print 'Benchmark is runing at 0.0.0.0:8888\n' \
-          'Quit the benchmark with CONTROL-C\n' \
-          'Use the following paths for benchmarking:\n' \
-          '  / - increment benchmark\n' \
-          '  /pool - connection pool benchmark\n' \
-          '  /mset - MSET benchmark\n' \
-          '  /redis-py/ - increment benchmark\n' \
-          '  /redis-py/mset - MSET benchmark'
+    print('Benchmark is runing at 0.0.0.0:8888\n'
+          'Quit the benchmark with CONTROL-C\n'
+          'Use the following paths for benchmarking:\n'
+          '  / - increment benchmark\n'
+          '  /pool - connection pool benchmark\n'
+          '  /mset - MSET benchmark\n'
+          '  /redis-py/ - increment benchmark\n'
+          '  /redis-py/mset - MSET benchmark')
     tornado.ioloop.IOLoop.instance().start()
