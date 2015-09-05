@@ -11,5 +11,4 @@ class Ipv6ConnectionTestCase(RedisTestCase):
         except tornadoredis.exceptions.ConnectionError as e:
             msg, = e.args
             bad_error = '[Errno -9] Address family for hostname not supported'
-            self.assertNotEquals(bad_error, msg)
-
+            self.assertNotEqual(bad_error, msg)
