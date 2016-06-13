@@ -1060,16 +1060,16 @@ class Client(object):
         self.execute_command(*tokens, callback=callback)
 
     ### GEO COMMANDS
-    def geoadd(self, key, longitude, latitude, member, *args, callback=None):
+    def geoadd(self, key, longitude, latitude, member, callback=None, *args):
         self.execute_command('GEOADD', key, longitude, latitude, member, callback=callback, *args)
 
     def geodist(self, key, member1, member2, unit='m', callback=None):
         self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
 
-    def geohash(self, key, member, *args, callback=None):
+    def geohash(self, key, member, callback=None, *args):
         self.execute_command('GEOHASH', key, member, callback=callback, *args)
 
-    def geopos(self, key, member, *args, callback=None):
+    def geopos(self, key, member, callback=None, *args):
         self.execute_command('GEOPOS', key, member, callback=callback, *args)
 
     def georadius(self, key, longitude, latitude, radius, unit='m',

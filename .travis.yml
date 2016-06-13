@@ -2,11 +2,12 @@ language: python
 python:
   - "3.3"
   - "3.4"
+  - "3.5"
   - "2.7"
   - "2.6"
   - "pypy"
 services:
-  - "redis"
+  - "redis-server"
 # command to install dependencies
 install: pip install -r requirements.txt --use-mirrors
 # command to run tests, e.g. python setup.py test
