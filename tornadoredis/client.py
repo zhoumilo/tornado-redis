@@ -1061,16 +1061,16 @@ class Client(object):
 
     ### GEO COMMANDS
     def geoadd(self, key, longitude, latitude, member, *args, callback=None):
-        self.execute_command('GEOADD', key, longitude, latitude, member, *args, callback=callback)
+        self.execute_command('GEOADD', key, longitude, latitude, member, callback=callback, *args)
 
     def geodist(self, key, member1, member2, unit='m', callback=None):
         self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
 
     def geohash(self, key, member, *args, callback=None):
-        self.execute_command('GEOHASH', key, member, *args, callback=callback)
+        self.execute_command('GEOHASH', key, member, callback=callback, *args)
 
     def geopos(self, key, member, *args, callback=None):
-        self.execute_command('GEOPOS', key, member, *args, callback=callback)
+        self.execute_command('GEOPOS', key, member, callback=callback, *args)
 
     def georadius(self, key, longitude, latitude, radius, unit='m',
                   with_coord=False, with_dist=False, with_hash=False,
@@ -1089,7 +1089,7 @@ class Client(object):
         if sort and sort in ['ASC', 'DESC']:
             args.append(sort)
 
-        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, *args, callback=callback)
+        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, callback=callback, *args)
 
     def georadiusbymember(self, key, member, radius, unit='m',
                           with_coord=False, with_dist=False, with_hash=False,
@@ -1108,7 +1108,7 @@ class Client(object):
         if sort and sort in ['ASC', 'DESC']:
             args.append(sort)
 
-        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, *args, callback=callback)
+        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, callback=callback, *args)
 
     ### PUBSUB
     def subscribe(self, channels, callback=None):
