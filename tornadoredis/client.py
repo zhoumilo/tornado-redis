@@ -159,28 +159,31 @@ def reply_map(*funcs):
     return reply_fn
 
 
+def reply_coords(r, *args, **kwargs):
+    return [(float(c[0]), float(c[1])) for c in r]
+
 def reply_geo_radius(r, *args, **kwargs):
     geo_data = []
     for member in r:
         name = member[0]
-        dist = coords = hash = None
+        dist = coords = hs = None
 
         if 'WITHDIST' in args:
-            dist = member[1]
+            dist = float(member[1])
 
-        if 'WITHCOORD' in args and 'WITHDIST'in args:
-            coords = member[2]
-        elif 'WITHCOORD' in args:
-            coords = member[1]
-
-        if 'WITHHASH' in args and 'WITHCOORD' in args and 'WITHDIST' in args:
-            hash = member[3]
-        elif 'WITHHASH' in args and ('WITHCOORD' in args or 'WITHDIST' in args):
-            hash = member[2]
+        if 'WITHHASH' in args and 'WITHDIST'in args:
+            hs = int(member[2])
         elif 'WITHHASH' in args:
-            hash = member[1]
+            hs = int(member[1])
 
-        geo_data.append(GeoData(name, dist, coords, hash))
+        if 'WITHCOORD' in args and 'WITHHASH' in args and 'WITHDIST' in args:
+            coords = (float(member[3][0]), float(member[3][1]))
+        elif 'WITHCOORD' in args and ('WITHHASH' in args or 'WITHDIST' in args):
+            coords = (float(member[2][0]), float(member[2][1]))
+        elif 'WITHCOORD' in args:
+            coords = (float(member[1][0]), float(member[1][1]))
+
+        geo_data.append(GeoData(name, dist, coords, hs))
     return geo_data
 
 def to_list(source):
@@ -233,7 +236,11 @@ REPLY_MAP = dict_merge(
                         reply_number),
     string_keys_to_dict('SCAN HSCAN SSCAN',
                         reply_map(reply_int, reply_set)),
-    string_keys_to_dict('GEORADIUS',
+    string_keys_to_dict('GEODIST',
+                        reply_number),
+    string_keys_to_dict('GEOPOS',
+                        reply_coords),
+    string_keys_to_dict('GEORADIUS GEORADIUSBYMEMBER',
                         reply_geo_radius),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),

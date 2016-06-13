@@ -9,6 +9,8 @@ from tornado import gen
 
 from .redistest import RedisTestCase, async_test
 
+from ..client import GeoData
+
 SCAN_BUF_SIZE = 200
 
 class ServerCommandsTestCase(RedisTestCase):
@@ -1145,6 +1147,137 @@ class ServerCommandsTestCase(RedisTestCase):
         for i in range(SCAN_BUF_SIZE):
             pair = ('test{0}'.format(i), i)
             self.assertTrue(pair in all_pairs, "{0} not in {1}".format(pair, all_pairs))
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_geoadd(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo')
+        self.assertEqual(res, 1)
+
+        res = yield gen.Task(
+            self.client.geoadd, 'geodata', 15.087269, 37.502669, 'Catania', 12.424315, 37.802105, 'Marsala'
+        )
+        self.assertEqual(res, 2)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_geodist(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo', 15.087269, 37.502669, 'Catania')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(
+            self.client.geodist, 'geodata', 'Palermo', 'Catania',
+        )
+        self.assertEqual(res, 166274.1516)
+
+        res = yield gen.Task(
+            self.client.geodist, 'geodata', 'Palermo', 'Catania', 'km'
+        )
+        self.assertEqual(res, 166.2742)
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_geohash(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo', 15.087269, 37.502669, 'Catania')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(
+            self.client.geohash, 'geodata', 'Palermo'
+        )
+        self.assertEqual(res, ['sqc8b49rny0'])
+
+        res = yield gen.Task(
+            self.client.geohash, 'geodata', 'Palermo', 'Catania'
+        )
+        self.assertEqual(res, ['sqc8b49rny0', 'sqdtr74hyu0'])
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_geopos(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo', 15.087269, 37.502669, 'Catania')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(
+            self.client.geopos, 'geodata', 'Palermo'
+        )
+        self.assertEqual(res, [(13.36138933897018433, 38.11555639549629859)])
+
+        res = yield gen.Task(
+            self.client.geopos, 'geodata', 'Catania', 'Palermo'
+        )
+        self.assertEqual(res, [(15.087267458438873, 37.50266842333162), (13.36138933897018433, 38.11555639549629859)])
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_georadius(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo', 15.087269, 37.502669, 'Catania')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(
+            self.client.georadius, 'geodata', 15, 37, 200, 'km', with_dist=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=190.4424, coords=None, hash=None),
+            GeoData(member='Catania', dist=56.4413, coords=None, hash=None)
+        ])
+
+        res = yield gen.Task(
+            self.client.georadius, 'geodata', 15, 37, 200, 'km', with_dist=True, with_coord=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=190.4424, coords=(13.361389338970184, 38.1155563954963), hash=None),
+            GeoData(member='Catania', dist=56.4413, coords=(15.087267458438873, 37.50266842333162), hash=None)
+        ])
+
+        res = yield gen.Task(
+            self.client.georadius, 'geodata', 15, 37, 200, 'km', with_dist=True, with_coord=True, with_hash=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=190.4424, coords=(13.361389338970184, 38.1155563954963), hash=3479099956230698),
+            GeoData(member='Catania', dist=56.4413, coords=(15.087267458438873, 37.50266842333162), hash=3479447370796909)
+        ])
+
+        self.stop()
+
+    @async_test
+    @gen.engine
+    def test_georadiusbymember(self):
+        res = yield gen.Task(self.client.geoadd, 'geodata', 13.361389, 38.115556, 'Palermo', 15.087269, 37.502669, 'Catania')
+        self.assertEqual(res, 2)
+
+        res = yield gen.Task(
+            self.client.georadiusbymember, 'geodata', 'Palermo', 200, 'km', with_dist=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=0.0, coords=None, hash=None),
+            GeoData(member='Catania', dist=166.2742, coords=None, hash=None)
+        ])
+
+        res = yield gen.Task(
+            self.client.georadiusbymember, 'geodata', 'Palermo', 200, 'km', with_dist=True, with_coord=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=0.0, coords=(13.361389338970184, 38.1155563954963), hash=None),
+            GeoData(member='Catania', dist=166.2742, coords=(15.087267458438873, 37.50266842333162), hash=None)
+        ])
+
+        res = yield gen.Task(
+            self.client.georadiusbymember, 'geodata', 'Palermo', 200, 'km', with_dist=True, with_coord=True, with_hash=True
+        )
+        self.assertEqual(res, [
+            GeoData(member='Palermo', dist=0.0, coords=(13.361389338970184, 38.1155563954963), hash=3479099956230698),
+            GeoData(member='Catania', dist=166.2742, coords=(15.087267458438873, 37.50266842333162), hash=3479447370796909)
+        ])
+
         self.stop()
 
     @async_test
