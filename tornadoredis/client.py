@@ -1210,9 +1210,14 @@ class Client(object):
 
             cmd_listen = CmdLine('LISTEN')
             while self.subscribed:
-                data = yield gen.Task(self.connection.readline)
-                if isinstance(data, Exception):
-                    raise data
+                try:
+                    data = yield gen.Task(self.connection.readline)
+                except Exception as e:
+                    # Maybe wrong!
+                    import logging
+                    logging.exception(e)
+
+                    data = None
 
                 if data is None:
                     # If disconnected from the redis server clear the list
