@@ -1059,6 +1059,57 @@ class Client(object):
         count and tokens.extend(['COUNT', count])
         self.execute_command(*tokens, callback=callback)
 
+    ### GEO COMMANDS
+    def geoadd(self, key, longitude, latitude, member, *args, callback=None):
+        self.execute_command('GEOADD', key, longitude, latitude, member, *args, callback=callback)
+
+    def geodist(self, key, member1, member2, unit='m', callback=None):
+        self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
+
+    def geohash(self, key, member, *args, callback=None):
+        self.execute_command('GEOHASH', key, member, *args, callback=callback)
+
+    def geopos(self, key, member, *args, callback=None):
+        self.execute_command('GEOPOS', key, member, *args, callback=callback)
+
+    def georadius(self, key, longitude, latitude, radius, unit='m',
+                  with_coord=False, with_dist=False, with_hash=False,
+                  count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+           args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, *args, callback=callback)
+
+    def georadiusbymember(self, key, member, radius, unit='m',
+                          with_coord=False, with_dist=False, with_hash=False,
+                          count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+            args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, *args, callback=callback)
+
     ### PUBSUB
     def subscribe(self, channels, callback=None):
         self._subscribe('SUBSCRIBE', channels, callback=callback)
@@ -1121,56 +1172,6 @@ class Client(object):
 
     def publish(self, channel, message, callback=None):
         self.execute_command('PUBLISH', channel, message, callback=callback)
-
-    def geoadd(self, key, longitude, latitude, member, *args, callback=None):
-        self.execute_command('GEOADD', key, longitude, latitude, member, *args, callback=callback)
-
-    def geodist(self, key, member1, member2, unit='m', callback=None):
-        self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
-
-    def geohash(self, key, member, *args, callback=None):
-        self.execute_command('GEOHASH', key, member, *args, callback=callback)
-
-    def geopos(self, key, member, *args, callback=None):
-        self.execute_command('GEOPOS', key, member, *args, callback=callback)
-
-    def georadius(self, key, longitude, latitude, radius, unit='m',
-                  with_coord=False, with_dist=False, with_hash=False,
-                  count=None, sort=None, callback=None):
-        args = []
-
-        if with_coord:
-            args.append('WITHCOORD')
-        if with_dist:
-            args.append('WITHDIST')
-        if with_hash:
-            args.append('WITHHASH')
-
-        if count and count > 0:
-           args.append(count)
-        if sort and sort in ['ASC', 'DESC']:
-            args.append(sort)
-
-        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, *args, callback=callback)
-
-    def georadiusbymember(self, key, member, radius, unit='m',
-                          with_coord=False, with_dist=False, with_hash=False,
-                          count=None, sort=None, callback=None):
-        args = []
-
-        if with_coord:
-            args.append('WITHCOORD')
-        if with_dist:
-            args.append('WITHDIST')
-        if with_hash:
-            args.append('WITHHASH')
-
-        if count and count > 0:
-            args.append(count)
-        if sort and sort in ['ASC', 'DESC']:
-            args.append(sort)
-
-        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, *args, callback=callback)
 
     @gen.engine
     def listen(self, callback=None, exit_callback=None):
