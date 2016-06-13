@@ -22,6 +22,7 @@ log = logging.getLogger('tornadoredis.client')
 
 
 Message = namedtuple('Message', ('kind', 'channel', 'body', 'pattern'))
+GeoData = namedtuple('GeoData', ('member', 'dist', 'coords', 'hash'))
 
 
 PY3 = sys.version > '3'
@@ -158,6 +159,30 @@ def reply_map(*funcs):
     return reply_fn
 
 
+def reply_geo_radius(r, *args, **kwargs):
+    geo_data = []
+    for member in r:
+        name = member[0]
+        dist = coords = hash = None
+
+        if 'WITHDIST' in args:
+            dist = member[1]
+
+        if 'WITHCOORD' in args and 'WITHDIST'in args:
+            coords = member[2]
+        elif 'WITHCOORD' in args:
+            coords = member[1]
+
+        if 'WITHHASH' in args and 'WITHCOORD' in args and 'WITHDIST' in args:
+            hash = member[3]
+        elif 'WITHHASH' in args and ('WITHCOORD' in args or 'WITHDIST' in args):
+            hash = member[2]
+        elif 'WITHHASH' in args:
+            hash = member[1]
+
+        geo_data.append(GeoData(name, dist, coords, hash))
+    return geo_data
+
 def to_list(source):
     if isinstance(source, str):
         return [source]
@@ -208,6 +233,8 @@ REPLY_MAP = dict_merge(
                         reply_number),
     string_keys_to_dict('SCAN HSCAN SSCAN',
                         reply_map(reply_int, reply_set)),
+    string_keys_to_dict('GEORADIUS',
+                        reply_geo_radius),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),
      'LASTSAVE': reply_datetime,
@@ -1087,6 +1114,56 @@ class Client(object):
 
     def publish(self, channel, message, callback=None):
         self.execute_command('PUBLISH', channel, message, callback=callback)
+
+    def geoadd(self, key, longitude, latitude, member, *args, callback=None):
+        self.execute_command('GEOADD', key, longitude, latitude, member, *args, callback=callback)
+
+    def geodist(self, key, member1, member2, unit='m', callback=None):
+        self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
+
+    def geohash(self, key, member, *args, callback=None):
+        self.execute_command('GEOHASH', key, member, *args, callback=callback)
+
+    def geopos(self, key, member, *args, callback=None):
+        self.execute_command('GEOPOS', key, member, *args, callback=callback)
+
+    def georadius(self, key, longitude, latitude, radius, unit='m',
+                  with_coord=False, with_dist=False, with_hash=False,
+                  count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+           args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, *args, callback=callback)
+
+    def georadiusbymember(self, key, member, radius, unit='m',
+                          with_coord=False, with_dist=False, with_hash=False,
+                          count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+            args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, *args, callback=callback)
 
     @gen.engine
     def listen(self, callback=None, exit_callback=None):
