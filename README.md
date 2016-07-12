@@ -3,6 +3,12 @@ Tornado-Redis
 
 [![Build Status](https://secure.travis-ci.org/leporo/tornado-redis.png)](https://travis-ci.org/leporo/tornado-redis)
 
+THIS PROJECT IS NOT MAINTAINED ANYMORE.
+
+HERE ARE SOME ALTERNATIVES:
+- [asyncio - based client (Python 3.3+)](https://github.com/aio-libs/aioredis)
+- [toredis](https://github.com/mrjoes/toredis)
+
 Asynchronous [Redis](http://redis.io/) client for the [Tornado Web Server](http://tornadoweb.org/).
 
 This is a fork of [brükva](https://github.com/evilkost/brukva) redis client
