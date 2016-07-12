@@ -2,12 +2,37 @@ language: python
 python:
   - "3.3"
   - "3.4"
+  - "3.5"
   - "2.7"
   - "2.6"
   - "pypy"
-services:
-  - "redis"
+env:
+  matrix:
+    - REDIS_TAG=3.2.0
+cache:
+  directories:
+    - $HOME/redis
+before_install:
+  - export REDIS_BIN=$HOME/redis/${REDIS_TAG}/bin
+  - >
+    if [ ! -x "$REDIS_BIN/redis-server" ]; then
+      # For proper caching we must build all redis versions
+      wget -c https://github.com/antirez/redis/archive/${REDIS_TAG}.tar.gz -O redis-${REDIS_TAG}.tar.gz
+      tar -xvf redis-${REDIS_TAG}.tar.gz
+      make -C redis-${REDIS_TAG} PREFIX=$HOME/redis/${REDIS_TAG} install
+    fi
 # command to install dependencies
-install: pip install -r requirements.txt --use-mirrors
+install:
+  - pip install -r requirements.txt --use-mirrors
+before_script:
+  - >
+    $REDIS_BIN/redis-server --daemonize yes
+    --pidfile ./redis-server.pid
+    --unixsocket /tmp/aioredis.sock
+    --port 6379
+    --save ""
+  - sleep 3
+  - export REDIS_VERSION="$(redis-cli INFO SERVER | sed -n 2p)"
+  - echo $REDIS_VERSION
 # command to run tests, e.g. python setup.py test
 script: python -m tornado.testing tornadoredis.tests

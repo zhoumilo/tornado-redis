@@ -86,10 +86,11 @@ class RedisTestCase(AsyncTestCase):
                 standardMsg = '%s not less than or equal to %s' % (safe_repr(a), safe_repr(b))
                 self.fail(self._formatMessage(msg, standardMsg))
 
-    def setUp(self):
+    def setUp(self, flush=True):
         super(RedisTestCase, self).setUp()
         self.client = self._new_client()
-        self.client.flushdb()
+        if flush:
+            self.client.flushdb()
 
     def tearDown(self):
         try:

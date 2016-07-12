@@ -22,6 +22,7 @@ log = logging.getLogger('tornadoredis.client')
 
 
 Message = namedtuple('Message', ('kind', 'channel', 'body', 'pattern'))
+GeoData = namedtuple('GeoData', ('member', 'dist', 'coords', 'hash'))
 
 
 PY3 = sys.version > '3'
@@ -158,6 +159,33 @@ def reply_map(*funcs):
     return reply_fn
 
 
+def reply_coords(r, *args, **kwargs):
+    return [(float(c[0]), float(c[1])) for c in r]
+
+def reply_geo_radius(r, *args, **kwargs):
+    geo_data = []
+    for member in r:
+        name = member[0]
+        dist = coords = hs = None
+
+        if 'WITHDIST' in args:
+            dist = float(member[1])
+
+        if 'WITHHASH' in args and 'WITHDIST'in args:
+            hs = int(member[2])
+        elif 'WITHHASH' in args:
+            hs = int(member[1])
+
+        if 'WITHCOORD' in args and 'WITHHASH' in args and 'WITHDIST' in args:
+            coords = (float(member[3][0]), float(member[3][1]))
+        elif 'WITHCOORD' in args and ('WITHHASH' in args or 'WITHDIST' in args):
+            coords = (float(member[2][0]), float(member[2][1]))
+        elif 'WITHCOORD' in args:
+            coords = (float(member[1][0]), float(member[1][1]))
+
+        geo_data.append(GeoData(name, dist, coords, hs))
+    return geo_data
+
 def to_list(source):
     if isinstance(source, str):
         return [source]
@@ -208,6 +236,12 @@ REPLY_MAP = dict_merge(
                         reply_number),
     string_keys_to_dict('SCAN HSCAN SSCAN',
                         reply_map(reply_int, reply_set)),
+    string_keys_to_dict('GEODIST',
+                        reply_number),
+    string_keys_to_dict('GEOPOS',
+                        reply_coords),
+    string_keys_to_dict('GEORADIUS GEORADIUSBYMEMBER',
+                        reply_geo_radius),
     {'HMGET': reply_hmget,
      'PING': make_reply_assert_msg('PONG'),
      'LASTSAVE': reply_datetime,
@@ -1025,6 +1059,57 @@ class Client(object):
         count and tokens.extend(['COUNT', count])
         self.execute_command(*tokens, callback=callback)
 
+    ### GEO COMMANDS
+    def geoadd(self, key, longitude, latitude, member, *args, **kwargs):
+        self.execute_command('GEOADD', key, longitude, latitude, member, *args, **kwargs)
+
+    def geodist(self, key, member1, member2, unit='m', callback=None):
+        self.execute_command('GEODIST', key, member1, member2, unit, callback=callback)
+
+    def geohash(self, key, member, *args, **kwargs):
+        self.execute_command('GEOHASH', key, member, *args, **kwargs)
+
+    def geopos(self, key, member, *args, **kwargs):
+        self.execute_command('GEOPOS', key, member, *args, **kwargs)
+
+    def georadius(self, key, longitude, latitude, radius, unit='m',
+                  with_coord=False, with_dist=False, with_hash=False,
+                  count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+           args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUS', key, longitude, latitude, radius, unit, callback=callback, *args)
+
+    def georadiusbymember(self, key, member, radius, unit='m',
+                          with_coord=False, with_dist=False, with_hash=False,
+                          count=None, sort=None, callback=None):
+        args = []
+
+        if with_coord:
+            args.append('WITHCOORD')
+        if with_dist:
+            args.append('WITHDIST')
+        if with_hash:
+            args.append('WITHHASH')
+
+        if count and count > 0:
+            args.append(count)
+        if sort and sort in ['ASC', 'DESC']:
+            args.append(sort)
+
+        self.execute_command('GEORADIUSBYMEMBER', key, member, radius, unit, callback=callback, *args)
+
     ### PUBSUB
     def subscribe(self, channels, callback=None):
         self._subscribe('SUBSCRIBE', channels, callback=callback)
@@ -1126,9 +1211,14 @@ class Client(object):
 
             cmd_listen = CmdLine('LISTEN')
             while self.subscribed:
-                data = yield gen.Task(self.connection.readline)
-                if isinstance(data, Exception):
-                    raise data
+                try:
+                    data = yield gen.Task(self.connection.readline)
+                except Exception as e:
+                    # Maybe wrong!
+                    import logging
+                    logging.exception(e)
+
+                    data = None
 
                 if data is None:
                     # If disconnected from the redis server clear the list

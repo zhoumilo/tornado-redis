@@ -123,7 +123,7 @@ class DisconnectTestCase(AsyncTestCase):
         # let command fail
         try:
             self.client.set('foo', 'bar', callback=self.stop)
-            # self.wait()
+            self.wait()
         except ConnectionError:
             pass
 
@@ -146,12 +146,15 @@ class DisconnectTestCase(AsyncTestCase):
         cb_disconnect = (yield gen.Callback('disconnect'))
 
         def handle_message(msg):
+            print(msg)
             if msg.kind == 'disconnect':
                 cb_disconnect(msg.channel)
 
         yield gen.Task(self.client.subscribe, 'foo')
-        self._server.disconnect()
         self.client.listen(handle_message)
+
+        self._server.disconnect()
+
         res = yield gen.Wait('disconnect')
         self.assertEqual(res, set(['foo']))
         self.assertFalse(self.client.subscribed)
